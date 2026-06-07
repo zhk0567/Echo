@@ -10,11 +10,6 @@ export interface SearchResult {
   snippet: string;
 }
 
-export interface RecentEntry {
-  date: string;
-  preview: string;
-}
-
 export interface DiaryStats {
   totalEntries: number;
   totalChars: number;

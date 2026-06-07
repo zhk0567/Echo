@@ -8,7 +8,6 @@ contextBridge.exposeInMainWorld('diaryAPI', {
     ipcRenderer.invoke('diary:saveEntry', date, content),
   deleteEntry: (date: string) => ipcRenderer.invoke('diary:deleteEntry', date),
   searchEntries: (query: string) => ipcRenderer.invoke('diary:searchEntries', query),
-  getRecentEntries: (limit: number) => ipcRenderer.invoke('diary:getRecentEntries', limit),
   getWritingStreak: () => ipcRenderer.invoke('diary:getWritingStreak'),
   getStats: (year: number, month: number) => ipcRenderer.invoke('diary:getStats', year, month),
   getMonthCharCounts: (year: number, month: number) =>

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { RecentList } from './RecentList';
 import { StatsCard } from './StatsCard';
 import {
   formatDisplayDate,
@@ -145,12 +144,6 @@ export function Sidebar({ selectedDate, onSelectDate, refreshKey }: SidebarProps
       </div>
 
       <StatsCard year={year} month={month} refreshKey={refreshKey} />
-
-      <RecentList
-        selectedDate={selectedDate}
-        onSelectDate={goToDate}
-        refreshKey={refreshKey}
-      />
 
       <div className="sidebar-footer">
         {streak > 0 && (

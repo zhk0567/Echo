@@ -13,11 +13,6 @@ export interface SearchResult {
   snippet: string;
 }
 
-export interface RecentEntry {
-  date: string;
-  preview: string;
-}
-
 export interface DiaryStats {
   totalEntries: number;
   totalChars: number;
@@ -216,17 +211,6 @@ function toLocalIso(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
-}
-
-export function getRecentEntries(root: string, limit: number): RecentEntry[] {
-  const dates = listDates(root).slice(-limit).reverse();
-
-  return dates.map((date) => {
-    const entry = getEntry(root, date);
-    const plain = entry?.content.replace(/[\r\n]+/g, ' ').trim() ?? '';
-    const preview = plain.length > 48 ? `${plain.slice(0, 48)}...` : plain;
-    return { date, preview };
-  });
 }
 
 export function getWritingStreak(root: string): number {

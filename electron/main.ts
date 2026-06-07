@@ -5,7 +5,6 @@ import {
   deleteEntry,
   getEntry,
   getMonthCharCounts,
-  getRecentEntries,
   getStats,
   getWritingStreak,
   listDates,
@@ -82,10 +81,6 @@ app.whenReady().then(() => {
 
   ipcMain.handle('diary:searchEntries', (_event, query: string) => {
     return searchEntries(root, query);
-  });
-
-  ipcMain.handle('diary:getRecentEntries', (_event, limit: number) => {
-    return getRecentEntries(root, limit);
   });
 
   ipcMain.handle('diary:getWritingStreak', () => {
