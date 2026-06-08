@@ -1,34 +1,44 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-Write-Host "Echo 日记 - 启动中..." -ForegroundColor Green
+Write-Host "Echo Diary - starting..." -ForegroundColor Green
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Host "错误：未检测到 Node.js，请先安装 Node.js (https://nodejs.org)" -ForegroundColor Red
-    Read-Host "按 Enter 退出"
+    Write-Host "Node.js not found. Install from https://nodejs.org" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
 if (-not (Test-Path "node_modules")) {
-    Write-Host "首次运行，正在安装依赖..." -ForegroundColor Yellow
+    Write-Host "Installing dependencies..." -ForegroundColor Yellow
     npm install
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "依赖安装失败" -ForegroundColor Red
-        Read-Host "按 Enter 退出"
+        Write-Host "npm install failed" -ForegroundColor Red
+        Read-Host "Press Enter to exit"
         exit 1
     }
 }
 
-if (-not (Test-Path "entries") -or ((Get-ChildItem "entries" -Filter "*.json" -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0)) {
-    Write-Host "正在迁移日记数据..." -ForegroundColor Yellow
+$entryFiles = Get-ChildItem "entries" -Filter "*.json" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}\.json$' }
+if (-not (Test-Path "entries") -or ($entryFiles | Measure-Object).Count -eq 0) {
+    Write-Host "Migrating diary data..." -ForegroundColor Yellow
     npm run migrate
 }
 
-$portableExe = Get-ChildItem "release" -Filter "Echo-Diary-*-portable.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($portableExe) {
-    Write-Host "启动已打包版本: $($portableExe.Name)" -ForegroundColor Green
+$env:ECHO_APP_ROOT = $PSScriptRoot
+
+$unpackedExe = Join-Path $PSScriptRoot "release\win-unpacked\Echo Diary.exe"
+$portableExe = Get-ChildItem "release" -Filter "Echo-Diary-*-portable.exe" -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+
+if (Test-Path $unpackedExe) {
+    Write-Host "Launching Echo Diary..." -ForegroundColor Green
+    Start-Process -FilePath $unpackedExe -WorkingDirectory $PSScriptRoot
+} elseif ($portableExe) {
+    Write-Host "Launching: $($portableExe.Name)" -ForegroundColor Green
     Start-Process -FilePath $portableExe.FullName -WorkingDirectory $PSScriptRoot
 } else {
-    Write-Host "启动开发模式..." -ForegroundColor Green
+    Write-Host "Starting dev mode..." -ForegroundColor Green
     npm run dev
 }

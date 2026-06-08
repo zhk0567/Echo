@@ -1,20 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DiaryEntry, EditorActions } from '../lib/types';
-import type { FontSize } from '../lib/preferences';
-import { getFontSize, setFontSize } from '../lib/preferences';
-import { shiftDate } from '../lib/dateUtils';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DiaryEntry, EditorActions, SavedEntryPayload } from '../lib/types';
+import { FontSettingsTrigger } from './FontSettings';
+import { formatDisplayDate, shiftDate } from '../lib/dateUtils';
 import { countDiaryChars } from '../lib/textUtils';
+import { useCustomOverlayScrollbar } from '../lib/useCustomOverlayScrollbar';
 
 interface EntryEditorProps {
   date: string;
   focusMode: boolean;
   onToggleFocusMode: () => void;
   onSelectDate: (date: string) => void;
-  onSaved: () => void;
+  onSaved: (payload: SavedEntryPayload) => void;
   onDirtyChange: (dirty: boolean) => void;
-  onDeleteRequest: () => void;
+  onNotify?: (message: string) => void;
+  highlightQuery?: string | null;
+  onHighlightDone?: () => void;
   editorRef: React.MutableRefObject<EditorActions | null>;
 }
+
+const AUTO_SAVE_MS = 600;
 
 function EditorSkeleton() {
   return (
@@ -36,21 +40,47 @@ export function EntryEditor({
   onSelectDate,
   onSaved,
   onDirtyChange,
-  onDeleteRequest,
+  onNotify,
+  highlightQuery,
+  onHighlightDone,
   editorRef,
 }: EntryEditorProps) {
   const [content, setContent] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [switching, setSwitching] = useState(false);
+  const [isSynced, setIsSynced] = useState(true);
+  const [showSaving, setShowSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastSaved, setLastSaved] = useState<string | null>(null);
-  const [fontSize, setFontSizeState] = useState<FontSize>(getFontSize);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef(content);
   const savedContentRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const scrollWrapRef = useRef<HTMLDivElement>(null);
+  const dateRef = useRef(date);
+  const onSelectDateRef = useRef(onSelectDate);
+  const saveRef = useRef<(text: string) => Promise<boolean>>(async () => true);
+  const onNotifyRef = useRef(onNotify);
+  onNotifyRef.current = onNotify;
+  const hasLoadedOnceRef = useRef(false);
 
   contentRef.current = content;
+  dateRef.current = date;
+  onSelectDateRef.current = onSelectDate;
+
+  const { metrics: scrollbar, onThumbMouseDown } = useCustomOverlayScrollbar(
+    textareaRef,
+    !initialLoading && !switching,
+    content,
+    scrollWrapRef,
+  );
+
+  const clearSavingDelay = useCallback(() => {
+    if (savingDelayRef.current) {
+      clearTimeout(savingDelayRef.current);
+      savingDelayRef.current = null;
+    }
+  }, []);
 
   const updateDirty = useCallback(() => {
     const dirty =
@@ -64,100 +94,168 @@ export function EntryEditor({
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      setSaving(true);
+      clearSavingDelay();
+      savingDelayRef.current = setTimeout(() => setShowSaving(true), 500);
       setError(null);
       try {
-        const entry: DiaryEntry = await window.diaryAPI.saveEntry(date, text);
+        await window.diaryAPI.saveEntry(dateRef.current, text);
         savedContentRef.current = text;
-        setLastSaved(entry.updatedAt);
-        onSaved();
+        setIsSynced(true);
+        onSaved({ date: dateRef.current, charCount: countDiaryChars(text) });
         onDirtyChange(false);
+        return true;
       } catch {
         setError('保存失败，请重试');
+        onNotifyRef.current?.('保存失败，请检查磁盘权限后重试');
         updateDirty();
+        return false;
       } finally {
-        setSaving(false);
+        clearSavingDelay();
+        setShowSaving(false);
       }
     },
-    [date, onSaved, onDirtyChange, updateDirty],
+    [onSaved, onDirtyChange, updateDirty, clearSavingDelay],
   );
+
+  saveRef.current = save;
 
   const loadEntry = useCallback(async () => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
-    setLoading(true);
+
+    if (!hasLoadedOnceRef.current) {
+      setInitialLoading(true);
+    } else {
+      setSwitching(true);
+    }
     setError(null);
+
     try {
       const entry = await window.diaryAPI.getEntry(date);
       const text = entry?.content ?? '';
       setContent(text);
       savedContentRef.current = text;
-      setLastSaved(entry?.updatedAt ?? null);
+      setIsSynced(true);
+      clearSavingDelay();
+      setShowSaving(false);
       onDirtyChange(false);
     } catch {
       setError('加载日记失败');
+      onNotifyRef.current?.(`加载失败：${formatDisplayDate(date)}`);
     } finally {
-      setLoading(false);
+      hasLoadedOnceRef.current = true;
+      setInitialLoading(false);
+      setSwitching(false);
     }
-  }, [date, onDirtyChange]);
+  }, [date, onDirtyChange, clearSavingDelay]);
 
   useEffect(() => {
     loadEntry();
   }, [loadEntry]);
 
   useEffect(() => {
-    if (!loading) {
+    if (!initialLoading && !switching) {
       textareaRef.current?.focus({ preventScroll: true });
     }
-  }, [loading, date]);
+  }, [initialLoading, switching, date, focusMode]);
+
+  useEffect(() => {
+    if (!highlightQuery || initialLoading || switching) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const lowerContent = content.toLowerCase();
+    const lowerQuery = highlightQuery.toLowerCase();
+    const index = lowerContent.indexOf(lowerQuery);
+    if (index === -1) {
+      onHighlightDone?.();
+      return;
+    }
+
+    const end = index + highlightQuery.length;
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(index, end);
+
+    const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 24;
+    const before = content.slice(0, index);
+    const line = (before.match(/\n/g) ?? []).length;
+    textarea.scrollTop = Math.max(0, line * lineHeight - textarea.clientHeight / 3);
+
+    onHighlightDone?.();
+  }, [highlightQuery, initialLoading, switching, content, onHighlightDone]);
+
+  const discardPendingChanges = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    setContent(savedContentRef.current);
+    setError(null);
+    setIsSynced(true);
+    onDirtyChange(false);
+  }, [onDirtyChange]);
 
   useEffect(() => {
     editorRef.current = {
-      save: () => save(contentRef.current),
-      flushPendingSave: () => save(contentRef.current),
+      save: () => saveRef.current(contentRef.current).then(() => undefined),
+      flushPendingSave: async () => {
+        if (debounceRef.current) {
+          clearTimeout(debounceRef.current);
+          debounceRef.current = null;
+        }
+        if (contentRef.current !== savedContentRef.current) {
+          await saveRef.current(contentRef.current);
+        }
+      },
       isDirty: () =>
         contentRef.current !== savedContentRef.current || debounceRef.current !== null,
+      discardPendingChanges,
     };
     return () => {
       editorRef.current = null;
     };
-  }, [editorRef, save]);
+  }, [editorRef, discardPendingChanges]);
 
   const scheduleSave = useCallback(
     (text: string) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      setIsSynced(false);
       onDirtyChange(true);
-      debounceRef.current = setTimeout(() => save(text), 1000);
+      debounceRef.current = setTimeout(() => saveRef.current(text), AUTO_SAVE_MS);
     },
-    [save, onDirtyChange],
+    [onDirtyChange],
   );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        save(contentRef.current);
+        void saveRef.current(contentRef.current);
       }
       if (e.altKey && e.key === 'ArrowLeft') {
         e.preventDefault();
-        onSelectDate(shiftDate(date, -1));
+        onSelectDateRef.current(shiftDate(dateRef.current, -1));
       }
       if (e.altKey && e.key === 'ArrowRight') {
         e.preventDefault();
-        onSelectDate(shiftDate(date, 1));
+        onSelectDateRef.current(shiftDate(dateRef.current, 1));
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [save, date, onSelectDate]);
+  }, []);
 
   useEffect(() => {
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
+      }
+      if (savingDelayRef.current) {
+        clearTimeout(savingDelayRef.current);
+        savingDelayRef.current = null;
       }
     };
   }, []);
@@ -167,109 +265,126 @@ export function EntryEditor({
     scheduleSave(value);
   };
 
-  const handleFontSize = (size: FontSize) => {
-    setFontSizeState(size);
-    setFontSize(size);
-  };
+  const charCount = useMemo(() => countDiaryChars(content), [content]);
 
-  const formatSavedTime = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleString('zh-CN', {
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  if (loading) {
+  if (initialLoading) {
     return <EditorSkeleton />;
   }
 
   const isEmpty = !content.trim();
 
-  return (
-    <div className="editor" key={date}>
-      <div className="editor-paper">
-        <div className="editor-toolbar">
-          <div className="editor-nav">
-            <button
-              className="btn-nav"
-              onClick={() => onSelectDate(shiftDate(date, -1))}
-              title="前一天 (Alt+←)"
-              aria-label="前一天"
-            >
-              ‹
-            </button>
-            <button
-              className="btn-nav"
-              onClick={() => onSelectDate(shiftDate(date, 1))}
-              title="后一天 (Alt+→)"
-              aria-label="后一天"
-            >
-              ›
-            </button>
-          </div>
-          <div className="editor-meta">
-            <span className="editor-stats">{countDiaryChars(content)} 字</span>
-            {saving && (
-              <span className="save-badge saving">
-                <span className="save-dot" />
-                保存中
-              </span>
-            )}
-            {!saving && lastSaved && content.trim() && (
-              <span className="save-badge saved">
-                <span className="save-check">✓</span>
-                已保存 {formatSavedTime(lastSaved)}
-              </span>
-            )}
-          </div>
-          <div className="editor-actions">
-            <div className="font-size-group">
-              {(['sm', 'md', 'lg'] as FontSize[]).map((size) => (
-                <button
-                  key={size}
-                  className={`btn-font-size${fontSize === size ? ' active' : ''}`}
-                  onClick={() => handleFontSize(size)}
-                  title={size === 'sm' ? '小' : size === 'md' ? '中' : '大'}
-                >
-                  {size === 'sm' ? '小' : size === 'md' ? '中' : '大'}
-                </button>
-              ))}
-            </div>
-            <button
-              className={`btn-secondary${focusMode ? ' active' : ''}`}
-              onClick={onToggleFocusMode}
-              title="专注模式 (Esc 退出)"
-            >
-              专注
-            </button>
-            <button className="btn-secondary" onClick={() => save(content)}>
-              保存
-            </button>
-            {content.trim() && (
-              <button className="btn-danger" onClick={onDeleteRequest}>
-                删除
-              </button>
-            )}
-          </div>
-        </div>
+  const saveStatus = showSaving ? (
+    <span className="save-badge saving" aria-live="polite">
+      <span className="save-dot" />
+      保存中
+    </span>
+  ) : isSynced ? (
+    <span className="save-badge saved" aria-live="off">
+      <span className="save-check">✓</span>
+      已保存
+    </span>
+  ) : null;
 
-        {error && <div className="editor-error">{error}</div>}
+  const scrollbarClass = [
+    'custom-scrollbar',
+    scrollbar.visible ? 'custom-scrollbar--visible' : '',
+    scrollbar.fading ? 'custom-scrollbar--fading' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div className={`editor${focusMode ? ' editor--focus' : ''}`}>
+      {focusMode && (
+        <div className="focus-chrome titlebar-no-drag">
+          <span className="focus-date">{formatDisplayDate(date)}</span>
+          <div className="focus-meta">
+            <span className="editor-stats">{charCount} 字</span>
+            {saveStatus}
+          </div>
+          <button
+            type="button"
+            className="btn-focus-exit"
+            onClick={onToggleFocusMode}
+            title="退出专注 (Esc)"
+          >
+            退出专注
+          </button>
+        </div>
+      )}
+      <div className={`editor-paper${switching ? ' editor-paper--switching' : ''}`}>
+        {switching && <div className="editor-switching-bar" aria-hidden="true" />}
+
+        {!focusMode && (
+          <div className="editor-toolbar">
+            <div className="editor-nav">
+              <button
+                type="button"
+                className="btn-nav"
+                onClick={() => onSelectDate(shiftDate(date, -1))}
+                title="前一天 (Alt+←)"
+                aria-label="前一天"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                className="btn-nav"
+                onClick={() => onSelectDate(shiftDate(date, 1))}
+                title="后一天 (Alt+→)"
+                aria-label="后一天"
+              >
+                ›
+              </button>
+            </div>
+            <div className="editor-meta">
+              <span className="editor-stats">{charCount} 字</span>
+              {saveStatus}
+            </div>
+            <div className="editor-actions">
+              <FontSettingsTrigger />
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={onToggleFocusMode}
+                title="专注模式 (Ctrl+Shift+F · Esc 退出)"
+              >
+                专注
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="editor-error" role="alert">
+            {error}
+          </div>
+        )}
 
         <div className="editor-body">
-          {isEmpty && (
+          {isEmpty && !switching && (
             <p className="editor-empty-hint">今天还没有写下什么，开始记录吧...</p>
           )}
-          <textarea
-            ref={textareaRef}
-            className="editor-textarea"
-            value={content}
-            onChange={(e) => handleChange(e.target.value)}
-            placeholder="写下今天的故事..."
-            spellCheck={false}
-          />
+          <div className="editor-scroll-wrap" ref={scrollWrapRef}>
+            <textarea
+              ref={textareaRef}
+              className="editor-textarea editor-textarea--overlay-scroll"
+              value={content}
+              onChange={(e) => handleChange(e.target.value)}
+              placeholder="写下今天的故事..."
+              spellCheck={false}
+              disabled={switching}
+            />
+            {scrollbar.showTrack && (
+              <div className={scrollbarClass} aria-hidden="true">
+                <div
+                  className="custom-scrollbar-thumb"
+                  style={{ top: scrollbar.thumbTop, height: scrollbar.thumbHeight }}
+                  onMouseDown={onThumbMouseDown}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

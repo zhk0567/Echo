@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { memo } from 'react';
 import type { DiaryStats } from '../lib/types';
 
 interface StatsCardProps {
-  year: number;
-  month: number;
-  refreshKey: number;
+  stats: DiaryStats | null;
+  loading?: boolean;
 }
 
 function formatTotalChars(chars: number): string {
@@ -12,14 +11,19 @@ function formatTotalChars(chars: number): string {
   return `${chars.toLocaleString()} 字`;
 }
 
-export function StatsCard({ year, month, refreshKey }: StatsCardProps) {
-  const [stats, setStats] = useState<DiaryStats | null>(null);
-
-  useEffect(() => {
-    window.diaryAPI.getStats(year, month).then(setStats);
-  }, [year, month, refreshKey]);
-
-  if (!stats) return null;
+export const StatsCard = memo(function StatsCard({ stats, loading }: StatsCardProps) {
+  if (loading || !stats) {
+    return (
+      <div className="stats-card stats-card--loading" aria-busy="true">
+        <div className="stats-skeleton-title" />
+        <div className="stats-skeleton-grid">
+          <div className="stats-skeleton-item" />
+          <div className="stats-skeleton-item" />
+          <div className="stats-skeleton-item stats-skeleton-item-wide" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="stats-card">
@@ -40,4 +44,4 @@ export function StatsCard({ year, month, refreshKey }: StatsCardProps) {
       </div>
     </div>
   );
-}
+});

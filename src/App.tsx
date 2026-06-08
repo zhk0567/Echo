@@ -1,135 +1,268 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, type SidebarHandle } from './components/Sidebar';
 import { EntryEditor } from './components/EntryEditor';
+import { AnalyticsPage } from './components/AnalyticsPage';
 import { SearchBar } from './components/SearchBar';
 import { ConfirmDialog } from './components/ConfirmDialog';
-import type { EditorActions } from './lib/types';
+import type { AppView, EditorActions, SavedEntryPayload } from './lib/types';
 import { formatDisplayDate, getRelativeDateLabel, getTodayIso } from './lib/dateUtils';
 
-type PendingAction =
-  | { type: 'navigate'; date: string }
-  | { type: 'delete' }
+type PendingNav =
+  | { type: 'date'; date: string; searchQuery?: string }
+  | { type: 'view'; view: AppView }
+  | { type: 'quit' }
   | null;
 
 export default function App() {
   const [selectedDate, setSelectedDate] = useState(getTodayIso());
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [view, setView] = useState<AppView>('diary');
+  const [analyticsRefreshKey, setAnalyticsRefreshKey] = useState(0);
+  const analyticsRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [focusMode, setFocusMode] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [analyticsSubtitle, setAnalyticsSubtitle] = useState('你的写作轨迹一览');
+  const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
+  const [pendingNav, setPendingNav] = useState<PendingNav>(null);
+  const [searchHighlight, setSearchHighlight] = useState<string | null>(null);
+  const [analyticsEverOpened, setAnalyticsEverOpened] = useState(false);
   const editorRef = useRef<EditorActions | null>(null);
+  const sidebarRef = useRef<SidebarHandle>(null);
+  const selectedDateRef = useRef(selectedDate);
+  const viewRef = useRef(view);
+  const isDirtyRef = useRef(false);
+
+  selectedDateRef.current = selectedDate;
+  viewRef.current = view;
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && focusMode) {
         setFocusMode(false);
       }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setFocusMode((f) => !f);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [focusMode]);
 
-  const handleSaved = useCallback(() => {
-    setRefreshKey((k) => k + 1);
+  const scheduleAnalyticsRefresh = useCallback(() => {
+    if (analyticsRefreshTimerRef.current) {
+      clearTimeout(analyticsRefreshTimerRef.current);
+    }
+    analyticsRefreshTimerRef.current = setTimeout(() => {
+      setAnalyticsRefreshKey((k) => k + 1);
+      analyticsRefreshTimerRef.current = null;
+    }, 3000);
   }, []);
 
-  const navigateTo = useCallback((date: string) => {
+  useEffect(() => {
+    return () => {
+      if (analyticsRefreshTimerRef.current) {
+        clearTimeout(analyticsRefreshTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleSaved = useCallback(
+    (payload: SavedEntryPayload) => {
+      sidebarRef.current?.updateEntryCharCount(payload.date, payload.charCount);
+      scheduleAnalyticsRefresh();
+    },
+    [scheduleAnalyticsRefresh],
+  );
+
+  const navigateTo = useCallback((date: string, searchQuery?: string) => {
+    setView('diary');
     setSelectedDate(date);
+    if (searchQuery) setSearchHighlight(searchQuery);
+  }, []);
+
+  const completePendingNav = useCallback(
+    (nav: NonNullable<PendingNav>) => {
+      if (nav.type === 'date') {
+        navigateTo(nav.date, nav.searchQuery);
+        return;
+      }
+      if (nav.type === 'quit') {
+        void window.diaryAPI.confirmAppClose();
+        return;
+      }
+      setView(nav.view);
+      if (nav.view === 'diary') {
+        setFocusMode(false);
+      }
+    },
+    [navigateTo],
+  );
+
+  const onDirtyChange = useCallback((dirty: boolean) => {
+    isDirtyRef.current = dirty;
+  }, []);
+
+  const promptIfDirty = useCallback((nav: NonNullable<PendingNav>) => {
+    if (viewRef.current === 'diary' && editorRef.current?.isDirty()) {
+      setPendingNav(nav);
+      setUnsavedDialogOpen(true);
+      return true;
+    }
+    return false;
   }, []);
 
   const requestSelectDate = useCallback(
-    (date: string) => {
-      if (date === selectedDate) return;
-      if (isDirty) {
-        setPendingAction({ type: 'navigate', date });
+    (date: string, searchQuery?: string) => {
+      if (
+        date === selectedDateRef.current &&
+        viewRef.current === 'diary' &&
+        !searchQuery
+      ) {
         return;
       }
-      navigateTo(date);
+      if (promptIfDirty({ type: 'date', date, searchQuery })) return;
+      navigateTo(date, searchQuery);
     },
-    [isDirty, selectedDate, navigateTo],
+    [navigateTo, promptIfDirty],
   );
 
-  const handleUnsavedSave = useCallback(async () => {
-    await editorRef.current?.flushPendingSave();
-    if (pendingAction?.type === 'navigate') {
-      navigateTo(pendingAction.date);
-    }
-    setPendingAction(null);
-  }, [pendingAction, navigateTo]);
+  const requestView = useCallback(
+    (nextView: AppView) => {
+      if (nextView === viewRef.current) return;
+      if (promptIfDirty({ type: 'view', view: nextView })) return;
+      setView(nextView);
+      if (nextView === 'diary') {
+        setFocusMode(false);
+      }
+    },
+    [promptIfDirty],
+  );
 
-  const handleUnsavedDiscard = useCallback(() => {
-    if (pendingAction?.type === 'navigate') {
-      navigateTo(pendingAction.date);
-    }
-    setPendingAction(null);
-    setIsDirty(false);
-  }, [pendingAction, navigateTo]);
-
-  const handleDeleteRequest = useCallback(() => {
-    setDeleteDialogOpen(true);
+  const closeUnsavedDialog = useCallback(() => {
+    setUnsavedDialogOpen(false);
+    setPendingNav(null);
   }, []);
 
-  const handleDeleteConfirm = useCallback(async () => {
-    setDeleteDialogOpen(false);
-    try {
-      await window.diaryAPI.deleteEntry(selectedDate);
-      setIsDirty(false);
-      setRefreshKey((k) => k + 1);
-    } catch {
-      // ignore
+  const handleUnsavedSave = useCallback(async () => {
+    const nav = pendingNav;
+    if (!nav) return;
+    await editorRef.current?.flushPendingSave();
+    if (editorRef.current?.isDirty()) {
+      setToast('保存失败，请检查磁盘权限后重试');
+      return;
     }
-  }, [selectedDate]);
+    closeUnsavedDialog();
+    completePendingNav(nav);
+  }, [pendingNav, closeUnsavedDialog, completePendingNav]);
+
+  const handleUnsavedDiscard = useCallback(() => {
+    const nav = pendingNav;
+    if (!nav) return;
+    editorRef.current?.discardPendingChanges();
+    closeUnsavedDialog();
+    completePendingNav(nav);
+  }, [pendingNav, closeUnsavedDialog, completePendingNav]);
+
+  const handleToggleFocusMode = useCallback(() => {
+    setFocusMode((f) => !f);
+  }, []);
+
+  const isDiaryView = view === 'diary';
+
+  useEffect(() => {
+    if (view === 'analytics') setAnalyticsEverOpened(true);
+  }, [view]);
+
+  useEffect(() => {
+    return window.diaryAPI.onCloseRequested(() => {
+      if (viewRef.current === 'diary' && editorRef.current?.isDirty()) {
+        setPendingNav({ type: 'quit' });
+        setUnsavedDialogOpen(true);
+      } else {
+        void window.diaryAPI.confirmAppClose();
+      }
+    });
+  }, []);
 
   return (
     <div className={`app${focusMode ? ' focus-mode' : ''}`}>
       <Sidebar
+        ref={sidebarRef}
         selectedDate={selectedDate}
         onSelectDate={requestSelectDate}
-        refreshKey={refreshKey}
+        onNotify={setToast}
+        inert={focusMode}
+        activeView={view}
+        onOpenAnalytics={() => requestView('analytics')}
+        onOpenDiary={() => requestView('diary')}
       />
       <main className="main">
-        <header className="main-header titlebar-drag">
-          <div className="main-header-date titlebar-no-drag" key={selectedDate}>
-            {formatDisplayDate(selectedDate)}
-            <span>{getRelativeDateLabel(selectedDate)}</span>
+        <header className={`main-header titlebar-drag${focusMode ? ' main-header--hidden' : ''}`}>
+          <div className="main-header-date titlebar-no-drag" key={isDiaryView ? selectedDate : view}>
+            {isDiaryView ? (
+              <>
+                {formatDisplayDate(selectedDate)}
+                <span>{getRelativeDateLabel(selectedDate)}</span>
+              </>
+            ) : (
+              <>
+                数据分析
+                <span>{analyticsSubtitle}</span>
+              </>
+            )}
           </div>
           <div className="main-header-search titlebar-no-drag">
-            <SearchBar onSelectDate={requestSelectDate} />
+            {isDiaryView && <SearchBar onSelectDate={requestSelectDate} />}
           </div>
         </header>
         <div className="main-body">
-          <EntryEditor
-            key={`${selectedDate}-${refreshKey}`}
-            date={selectedDate}
-            focusMode={focusMode}
-            onToggleFocusMode={() => setFocusMode((f) => !f)}
-            onSelectDate={requestSelectDate}
-            onSaved={handleSaved}
-            onDirtyChange={setIsDirty}
-            onDeleteRequest={handleDeleteRequest}
-            editorRef={editorRef}
-          />
+          <div className={`main-pane${isDiaryView ? '' : ' main-pane--hidden'}`}>
+            <EntryEditor
+              date={selectedDate}
+              focusMode={focusMode}
+              onToggleFocusMode={handleToggleFocusMode}
+              onSelectDate={requestSelectDate}
+              onSaved={handleSaved}
+              onDirtyChange={onDirtyChange}
+              onNotify={setToast}
+              highlightQuery={searchHighlight}
+              onHighlightDone={() => setSearchHighlight(null)}
+              editorRef={editorRef}
+            />
+          </div>
+          {analyticsEverOpened && (
+            <div className={`main-pane${isDiaryView ? ' main-pane--hidden' : ''}`}>
+              <AnalyticsPage
+                refreshKey={analyticsRefreshKey}
+                onSelectDate={requestSelectDate}
+                onSubtitleChange={setAnalyticsSubtitle}
+              />
+            </div>
+          )}
         </div>
       </main>
 
-      <ConfirmDialog
-        open={pendingAction !== null}
-        mode="unsaved"
-        title="有未保存的修改"
-        message="当前日记尚未保存，离开前如何处理？"
-        onCancel={() => setPendingAction(null)}
-        onSave={handleUnsavedSave}
-        onDiscard={handleUnsavedDiscard}
-      />
+      {toast && (
+        <div className="app-toast" role="alert">
+          {toast}
+        </div>
+      )}
 
       <ConfirmDialog
-        open={deleteDialogOpen}
-        title="删除日记"
-        message="确定删除这篇日记吗？此操作不可恢复。"
-        confirmLabel="删除"
-        onConfirm={handleDeleteConfirm}
-        onCancel={() => setDeleteDialogOpen(false)}
+        open={unsavedDialogOpen}
+        mode="unsaved"
+        title="有未保存的修改"
+        message="当前日记尚未保存，要离开吗？"
+        onCancel={closeUnsavedDialog}
+        onSave={handleUnsavedSave}
+        onDiscard={handleUnsavedDiscard}
+        closeOnOverlayClick={false}
       />
     </div>
   );

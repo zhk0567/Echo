@@ -12,4 +12,14 @@ contextBridge.exposeInMainWorld('diaryAPI', {
   getStats: (year: number, month: number) => ipcRenderer.invoke('diary:getStats', year, month),
   getMonthCharCounts: (year: number, month: number) =>
     ipcRenderer.invoke('diary:getMonthCharCounts', year, month),
+  getMonthOverview: (year: number, month: number) =>
+    ipcRenderer.invoke('diary:getMonthOverview', year, month),
+  getAnalytics: () => ipcRenderer.invoke('diary:getAnalytics'),
+  confirmAppClose: () => ipcRenderer.invoke('diary:confirmClose'),
+  exportToTxt: () => ipcRenderer.invoke('diary:exportToTxt'),
+  onCloseRequested: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('diary:requestClose', handler);
+    return () => ipcRenderer.removeListener('diary:requestClose', handler);
+  },
 });

@@ -1,16 +1,15 @@
 # Echo 日记
 
-一款本地化的个人日记桌面应用，温暖纸张风格，数据完全保存在本机。
+一款本地化的个人日记桌面应用，温暖墨感横线稿纸风格，数据完全保存在本机。
 
 ## 功能
 
 - 月历浏览与快速跳转，有日记的日期按字数深浅高亮
-- 笔记本风格编辑器（横线、左侧红线、纸张纹理）
-- 自动保存，支持小 / 中 / 大字號
-- 专注模式（隐藏侧边栏，`Esc` 退出）
-- 全文搜索，关键词高亮
+- 墨感横线稿纸编辑器（深褐墨色正文、清晰行线），支持小 / 中 / 大字号
+- 自动保存，专注模式（隐藏侧边栏）
+- 全文搜索，关键词高亮，键盘选择结果
 - 写作统计：累计篇数、字数、本月字数、连续写作天数
-- 从 `日记.txt` 一键迁移至 JSON 格式
+- 从 `日记.txt` 或 `zhita_settings.xlsx` 导入历史日记
 
 ## 技术栈
 
@@ -36,6 +35,9 @@ npm install
 # 若存在 日记.txt，迁移到 entries/
 npm run migrate
 
+# 若存在 zhita_settings.xlsx（「日记」工作表），导入缺失条目
+npm run import:xlsx
+
 # 启动应用
 .\start.ps1
 # 或
@@ -51,15 +53,17 @@ npm run dev
 | `.\start.ps1` | 一键启动（推荐） |
 | `npm run dev` | 开发模式 |
 | `npm run migrate` | 将 `日记.txt` 迁移为 JSON |
+| `npm run import:xlsx` | 从 `zhita_settings.xlsx` 导入日记 |
 | `npm run build` | 打包到 `release/` 目录 |
 
 ## 数据目录
 
 ```
 Echo/
-├── entries/          # 日记 JSON（运行时生成，默认不提交到 Git）
+├── entries/              # 日记 JSON（运行时生成，默认不提交到 Git）
 │   └── 2026-01-01.json
-├── 日记.txt          # 原始 txt 备份（可选，只读）
+├── 日记.txt              # 原始 txt 备份（可选，只读）
+├── zhita_settings.xlsx   # Excel 历史日记（可选，启动时自动补全缺失条目）
 └── ...
 ```
 
@@ -74,7 +78,7 @@ Echo/
 }
 ```
 
-应用只读写 `entries/`，不会修改 `日记.txt`。
+应用只读写 `entries/`，不会修改 `日记.txt` 或 Excel 源文件。
 
 ## 快捷键
 
@@ -82,8 +86,10 @@ Echo/
 |--------|------|
 | `Ctrl+S` | 手动保存 |
 | `Ctrl+K` | 聚焦搜索框 |
+| `Ctrl+Shift+F` | 进入 / 退出专注模式 |
 | `Alt+←` / `Alt+→` | 切换上 / 下一天 |
-| `Esc` | 退出专注模式 |
+| `Esc` | 退出专注模式 / 关闭搜索 |
+| `↑` / `↓` / `Enter` | 搜索时选择结果 |
 
 ## 项目结构
 
@@ -93,7 +99,7 @@ Echo/
 │   ├── components/     # 界面组件
 │   ├── lib/            # 工具函数
 │   └── styles/         # 样式
-├── scripts/            # 迁移脚本
+├── scripts/            # 迁移与导入脚本
 ├── start.ps1           # Windows 启动脚本
 └── package.json
 ```

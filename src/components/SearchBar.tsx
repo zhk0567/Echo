@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { SearchResult } from '../lib/types';
 import { formatDisplayDate } from '../lib/dateUtils';
 
 interface SearchBarProps {
-  onSelectDate: (date: string) => void;
+  onSelectDate: (date: string, searchQuery?: string) => void;
 }
 
 function SearchIcon() {
@@ -24,7 +24,13 @@ function SearchIcon() {
   );
 }
 
-function HighlightSnippet({ text, query }: { text: string; query: string }) {
+const HighlightSnippet = memo(function HighlightSnippet({
+  text,
+  query,
+}: {
+  text: string;
+  query: string;
+}) {
   const lowerText = text.toLowerCase();
   const lowerQuery = query.toLowerCase();
   const index = lowerText.indexOf(lowerQuery);
@@ -38,34 +44,47 @@ function HighlightSnippet({ text, query }: { text: string; query: string }) {
       {text.slice(index + query.length)}
     </>
   );
-}
+});
 
-export function SearchBar({ onSelectDate }: SearchBarProps) {
+const MIN_QUERY_LENGTH = 1;
+const SEARCH_DEBOUNCE_MS = 400;
+
+export const SearchBar = memo(function SearchBar({ onSelectDate }: SearchBarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchSeqRef = useRef(0);
 
   useEffect(() => {
-    if (!query.trim()) {
+    const trimmed = query.trim();
+    if (trimmed.length < MIN_QUERY_LENGTH) {
       setResults([]);
       setExpanded(false);
+      setSearching(false);
+      setActiveIndex(-1);
       return;
     }
 
+    const seq = ++searchSeqRef.current;
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const found = await window.diaryAPI.searchEntries(query);
+        const found = await window.diaryAPI.searchEntries(trimmed);
+        if (seq !== searchSeqRef.current) return;
         setResults(found);
         setExpanded(true);
+        setActiveIndex(found.length > 0 ? 0 : -1);
       } finally {
-        setSearching(false);
+        if (seq === searchSeqRef.current) {
+          setSearching(false);
+        }
       }
-    }, 300);
+    }, SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
   }, [query]);
@@ -80,26 +99,52 @@ export function SearchBar({ onSelectDate }: SearchBarProps) {
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, []);
 
+  const handleSelect = useCallback(
+    (date: string) => {
+      onSelectDate(date, query.trim() || undefined);
+      setExpanded(false);
+      setQuery('');
+      setActiveIndex(-1);
+    },
+    [onSelectDate, query],
+  );
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         inputRef.current?.focus();
+        return;
       }
-      if (e.key === 'Escape' && focused) {
+
+      if (!focused && !expanded) return;
+
+      if (e.key === 'Escape') {
         setExpanded(false);
         inputRef.current?.blur();
+        return;
+      }
+
+      if (!expanded || results.length === 0) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActiveIndex((i) => (i + 1) % results.length);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActiveIndex((i) => (i <= 0 ? results.length - 1 : i - 1));
+      } else if (e.key === 'Enter' && activeIndex >= 0) {
+        e.preventDefault();
+        handleSelect(results[activeIndex].date);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [focused]);
+  }, [focused, expanded, results, activeIndex, handleSelect]);
 
-  const handleSelect = (date: string) => {
-    onSelectDate(date);
-    setExpanded(false);
-    setQuery('');
-  };
+  const trimmedQuery = query.trim();
+  const showPanel = expanded && trimmedQuery.length > 0;
+  const showResults = showPanel && trimmedQuery.length >= MIN_QUERY_LENGTH;
 
   return (
     <div className="search-bar" ref={containerRef}>
@@ -110,6 +155,7 @@ export function SearchBar({ onSelectDate }: SearchBarProps) {
           type="search"
           className="search-input"
           placeholder="搜索日记... (Ctrl+K)"
+          aria-label="搜索日记"
           value={query}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
@@ -118,10 +164,12 @@ export function SearchBar({ onSelectDate }: SearchBarProps) {
         {searching && <span className="search-status">搜索中</span>}
         {query && !searching && (
           <button
+            type="button"
             className="search-clear"
             onClick={() => {
               setQuery('');
               setExpanded(false);
+              setActiveIndex(-1);
               inputRef.current?.focus();
             }}
             aria-label="清除搜索"
@@ -131,22 +179,26 @@ export function SearchBar({ onSelectDate }: SearchBarProps) {
         )}
       </div>
 
-      {expanded && query.trim() && (
-        <div className="search-results">
+      {showResults && (
+        <div className="search-results scrollbar-pill" role="listbox">
           {results.length === 0 ? (
             <p className="search-empty">未找到匹配结果</p>
           ) : (
             <>
               <p className="search-results-count">找到 {results.length} 条结果</p>
-              {results.map((r) => (
+              {results.map((r, index) => (
                 <button
                   key={r.date}
-                  className="search-result-item"
+                  type="button"
+                  className={`search-result-item${index === activeIndex ? ' active' : ''}`}
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  onMouseEnter={() => setActiveIndex(index)}
                   onClick={() => handleSelect(r.date)}
                 >
                   <span className="search-result-date">{formatDisplayDate(r.date)}</span>
                   <span className="search-result-snippet">
-                    <HighlightSnippet text={r.snippet} query={query} />
+                    <HighlightSnippet text={r.snippet} query={trimmedQuery} />
                   </span>
                 </button>
               ))}
@@ -156,4 +208,4 @@ export function SearchBar({ onSelectDate }: SearchBarProps) {
       )}
     </div>
   );
-}
+});

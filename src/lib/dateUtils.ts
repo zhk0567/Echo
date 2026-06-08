@@ -5,6 +5,18 @@ export function formatDisplayDate(dateStr: string): string {
   return `${year}年${month}月${day}日 星期${weekdays[date.getDay()]}`;
 }
 
+export function formatCompactDisplayDate(dateStr: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return `${year}年${month}月${day}日`;
+}
+
+export function formatShortDisplayDate(dateStr: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+  const date = new Date(year, month - 1, day);
+  return `${month}月${day}日 周${weekdays[date.getDay()]}`;
+}
+
 export function getTodayIso(): string {
   const now = new Date();
   const y = now.getFullYear();

@@ -7,3 +7,11 @@ export function normalizeNewlines(text: string): string {
 export function countDiaryChars(text: string): number {
   return normalizeNewlines(text).replace(/\n/g, '').length;
 }
+
+/** 热力等级：0 无内容，1 少，2 中，3 多 */
+export function getHeatLevel(chars: number): 0 | 1 | 2 | 3 {
+  if (chars <= 0) return 0;
+  if (chars >= 800) return 3;
+  if (chars >= 200) return 2;
+  return 1;
+}

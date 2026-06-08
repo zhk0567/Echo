@@ -1,34 +1,78 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import {
   deleteEntry,
+  exportDiaryToTxt,
   getEntry,
   getMonthCharCounts,
+  getAnalytics,
+  getMonthOverview,
   getStats,
   getWritingStreak,
   listDates,
   migrateFromTxtIfNeeded,
+  migrateFromXlsxIfNeeded,
   saveEntry,
   searchEntries,
 } from './diaryStore';
 
 let mainWindow: BrowserWindow | null = null;
+let allowClose = false;
+
+// Windows 11 Fluent 滚动条会忽略 webkit 自定义样式，改用经典滚动条以支持圆角胶囊形
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch('disable-features', 'FluentOverlayScrollbars,FluentScrollbar');
+}
+
+function hasDataMarkers(root: string): boolean {
+  return (
+    fs.existsSync(path.join(root, 'entries')) ||
+    fs.existsSync(path.join(root, '日记.txt')) ||
+    fs.existsSync(path.join(root, 'zhita_settings.xlsx'))
+  );
+}
+
+/** Walk upward to find the project folder that contains entries/ or legacy import files. */
+function findAppRootFrom(startDir: string): string | null {
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < 8; i++) {
+    if (hasDataMarkers(dir)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
 
 function getAppRoot(): string {
-  const cwd = process.cwd();
-  if (fs.existsSync(path.join(cwd, 'entries')) || fs.existsSync(path.join(cwd, '日记.txt'))) {
-    return cwd;
+  if (process.env.ECHO_APP_ROOT) {
+    const explicit = findAppRootFrom(process.env.ECHO_APP_ROOT);
+    if (explicit) return explicit;
+    if (hasDataMarkers(process.env.ECHO_APP_ROOT)) return process.env.ECHO_APP_ROOT;
   }
-  if (app.isPackaged) {
-    return path.dirname(app.getPath('exe'));
+
+  const candidates = [
+    process.env.PORTABLE_EXECUTABLE_DIR,
+    process.cwd(),
+    app.isPackaged ? path.dirname(app.getPath('exe')) : null,
+  ].filter((d): d is string => typeof d === 'string' && d.length > 0);
+
+  for (const dir of candidates) {
+    const found = findAppRootFrom(dir);
+    if (found) return found;
   }
-  return cwd;
+
+  return (
+    process.env.PORTABLE_EXECUTABLE_DIR ||
+    (app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd())
+  );
 }
 
 function createWindow() {
   const root = getAppRoot();
   migrateFromTxtIfNeeded(root);
+  migrateFromXlsxIfNeeded(root);
 
   mainWindow = new BrowserWindow({
     width: 1100,
@@ -38,8 +82,8 @@ function createWindow() {
     title: 'Echo 日记',
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#fffef8',
-      symbolColor: '#3a342e',
+      color: '#faf6ee',
+      symbolColor: '#1f1a16',
       height: 36,
     },
     webPreferences: {
@@ -55,8 +99,15 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
+  mainWindow.on('close', (e) => {
+    if (allowClose) return;
+    e.preventDefault();
+    mainWindow?.webContents.send('diary:requestClose');
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
+    allowClose = false;
   });
 }
 
@@ -93,6 +144,37 @@ app.whenReady().then(() => {
 
   ipcMain.handle('diary:getMonthCharCounts', (_event, year: number, month: number) => {
     return getMonthCharCounts(root, year, month);
+  });
+
+  ipcMain.handle('diary:getMonthOverview', (_event, year: number, month: number) => {
+    return getMonthOverview(root, year, month);
+  });
+
+  ipcMain.handle('diary:getAnalytics', () => {
+    return getAnalytics(root);
+  });
+
+  ipcMain.handle('diary:confirmClose', () => {
+    allowClose = true;
+    mainWindow?.close();
+  });
+
+  ipcMain.handle('diary:exportToTxt', async () => {
+    const win = mainWindow ?? BrowserWindow.getFocusedWindow();
+    const { canceled, filePath } = await dialog.showSaveDialog(win ?? undefined, {
+      title: '导出日记',
+      defaultPath: path.join(root, '日记.txt'),
+      filters: [{ name: '文本文件', extensions: ['txt'] }],
+    });
+    if (canceled || !filePath) {
+      return { ok: false as const, cancelled: true };
+    }
+    try {
+      const { count } = exportDiaryToTxt(root, filePath);
+      return { ok: true as const, path: filePath, count };
+    } catch {
+      return { ok: false as const, cancelled: false };
+    }
   });
 
   createWindow();
