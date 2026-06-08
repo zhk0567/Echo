@@ -23,3 +23,48 @@ contextBridge.exposeInMainWorld('diaryAPI', {
     return () => ipcRenderer.removeListener('diary:requestClose', handler);
   },
 });
+
+contextBridge.exposeInMainWorld('aiAPI', {
+  checkHealth: () => ipcRenderer.invoke('ai:checkHealth'),
+  chatStream: (requestId: string, messages: AiMessage[]) =>
+    ipcRenderer.invoke('ai:chatStream', requestId, messages),
+  abort: (requestId: string) => ipcRenderer.invoke('ai:abort', requestId),
+  onStreamChunk: (callback: (payload: AiStreamChunkEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: AiStreamChunkEvent) =>
+      callback(payload);
+    ipcRenderer.on('ai:stream-chunk', handler);
+    return () => ipcRenderer.removeListener('ai:stream-chunk', handler);
+  },
+  onStreamDone: (callback: (payload: AiStreamDoneEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: AiStreamDoneEvent) =>
+      callback(payload);
+    ipcRenderer.on('ai:stream-done', handler);
+    return () => ipcRenderer.removeListener('ai:stream-done', handler);
+  },
+  onStreamError: (callback: (payload: AiStreamErrorEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: AiStreamErrorEvent) =>
+      callback(payload);
+    ipcRenderer.on('ai:stream-error', handler);
+    return () => ipcRenderer.removeListener('ai:stream-error', handler);
+  },
+});
+
+interface AiMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface AiStreamChunkEvent {
+  requestId: string;
+  chunk: string;
+}
+
+interface AiStreamDoneEvent {
+  requestId: string;
+  aborted?: boolean;
+}
+
+interface AiStreamErrorEvent {
+  requestId: string;
+  error: string;
+}

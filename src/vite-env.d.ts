@@ -94,6 +94,43 @@ interface DiaryAPI {
   >;
 }
 
+interface AiMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface AiStreamChunkEvent {
+  requestId: string;
+  chunk: string;
+}
+
+interface AiStreamDoneEvent {
+  requestId: string;
+  aborted?: boolean;
+}
+
+interface AiStreamErrorEvent {
+  requestId: string;
+  error: string;
+}
+
+interface OllamaHealth {
+  ok: boolean;
+  hasModel: boolean;
+  models: string[];
+  error?: string;
+}
+
+interface AiAPI {
+  checkHealth: () => Promise<OllamaHealth>;
+  chatStream: (requestId: string, messages: AiMessage[]) => Promise<void>;
+  abort: (requestId: string) => Promise<void>;
+  onStreamChunk: (callback: (payload: AiStreamChunkEvent) => void) => () => void;
+  onStreamDone: (callback: (payload: AiStreamDoneEvent) => void) => () => void;
+  onStreamError: (callback: (payload: AiStreamErrorEvent) => void) => () => void;
+}
+
 interface Window {
   diaryAPI: DiaryAPI;
+  aiAPI: AiAPI;
 }

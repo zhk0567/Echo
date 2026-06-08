@@ -3,6 +3,15 @@ import react from '@vitejs/plugin-react';
 import electron from 'vite-plugin-electron/simple';
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     electron({

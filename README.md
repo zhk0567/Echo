@@ -9,6 +9,7 @@
 - 自动保存，专注模式（隐藏侧边栏）
 - 全文搜索，关键词高亮，键盘选择结果
 - 写作统计：累计篇数、字数、本月字数、连续写作天数
+- **AI 助手**（需本机 Ollama）：编辑器侧栏对话、数据分析页洞察生成
 - 从 `日记.txt` 或 `zhita_settings.xlsx` 导入历史日记
 
 ## 技术栈
@@ -21,6 +22,24 @@
 
 - [Node.js](https://nodejs.org/) 18 或更高版本
 - Windows（开发与打包主要针对 Windows）
+- （可选）[Ollama](https://ollama.com/)：启用 AI 助手与数据分析洞察
+
+## Ollama AI（可选）
+
+Echo 通过本机 Ollama（默认 `http://127.0.0.1:11434`）调用模型 **`nemotron-3-super:cloud`**。该模型为 Ollama Cloud 模型，日记正文或统计摘要会经本机 Ollama 转发至云端推理，请确保已登录 Ollama 账户。
+
+```powershell
+# 1. 安装并启动 Ollama（保持后台运行）
+# 2. 拉取默认模型
+ollama pull nemotron-3-super:cloud
+```
+
+| 功能 | 入口 |
+|------|------|
+| 日记 AI 对话 | 编辑器工具栏「AI」按钮，基于当前日期与正文 |
+| 写作洞察 | 数据分析页「生成 AI 洞察」，基于统计数据 |
+
+Ollama 未启动或模型未安装时，界面会显示引导提示，不会影响日记读写。
 
 ## 快速开始
 

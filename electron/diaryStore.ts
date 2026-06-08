@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import * as XLSX from 'xlsx';
+
+type XlsxModule = typeof import('xlsx');
 
 export interface DiaryEntry {
   date: string;
@@ -195,6 +196,10 @@ function ensureStatsCache(root: string): StatsCache {
 
   statsCache = buildStatsCacheFromCharMap(root, charMap);
   return statsCache;
+}
+
+export function warmupDiaryStore(root: string): void {
+  ensureStatsCache(root);
 }
 
 function persistCharIndexFromCache(root: string): void {
@@ -425,8 +430,42 @@ export function migrateFromTxtIfNeeded(root: string): void {
 }
 
 const XLSX_DIARY_SHEET = '日记';
+const XLSX_IMPORT_MARKER = '_xlsxImport.json';
 
-function parseXlsxDate(value: unknown): string | null {
+interface XlsxImportMarker {
+  version: 1;
+  xlsxMtime: number;
+  xlsxSize: number;
+}
+
+function getXlsxImportMarkerPath(root: string): string {
+  return path.join(getEntriesDir(root), XLSX_IMPORT_MARKER);
+}
+
+function shouldSkipXlsxImport(root: string, xlsxPath: string): boolean {
+  const markerPath = getXlsxImportMarkerPath(root);
+  if (!fs.existsSync(markerPath)) return false;
+  try {
+    const marker = JSON.parse(fs.readFileSync(markerPath, 'utf-8')) as XlsxImportMarker;
+    const stat = fs.statSync(xlsxPath);
+    return marker.xlsxMtime === stat.mtimeMs && marker.xlsxSize === stat.size;
+  } catch {
+    return false;
+  }
+}
+
+function writeXlsxImportMarker(root: string, xlsxPath: string): void {
+  const stat = fs.statSync(xlsxPath);
+  const marker: XlsxImportMarker = {
+    version: 1,
+    xlsxMtime: stat.mtimeMs,
+    xlsxSize: stat.size,
+  };
+  ensureEntriesDir(root);
+  fs.writeFileSync(getXlsxImportMarkerPath(root), JSON.stringify(marker), 'utf-8');
+}
+
+function parseXlsxDate(value: unknown, XLSX: XlsxModule): string | null {
   if (value === null || value === undefined || value === '') return null;
 
   if (value instanceof Date) {
@@ -448,7 +487,10 @@ function parseXlsxDate(value: unknown): string | null {
   return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
-function parseXlsxDiaryRows(xlsxPath: string): Array<{ date: string; content: string }> {
+async function parseXlsxDiaryRows(
+  xlsxPath: string,
+): Promise<Array<{ date: string; content: string }>> {
+  const XLSX = await import('xlsx');
   const workbook = XLSX.readFile(xlsxPath);
   const sheet = workbook.Sheets[XLSX_DIARY_SHEET];
   if (!sheet) return [];
@@ -460,7 +502,7 @@ function parseXlsxDiaryRows(xlsxPath: string): Array<{ date: string; content: st
     const row = rows[i];
     if (!Array.isArray(row) || row.length < 2) continue;
 
-    const date = parseXlsxDate(row[0]);
+    const date = parseXlsxDate(row[0], XLSX);
     if (!date) continue;
 
     const content = normalizeNewlines(String(row[1] ?? '')).trim();
@@ -472,14 +514,27 @@ function parseXlsxDiaryRows(xlsxPath: string): Array<{ date: string; content: st
   return entries;
 }
 
-export function migrateFromXlsxIfNeeded(root: string): { created: number; skipped: number } {
+export async function migrateFromXlsxIfNeeded(
+  root: string,
+): Promise<{ created: number; skipped: number }> {
   const xlsxPath = path.join(root, 'zhita_settings.xlsx');
   if (!fs.existsSync(xlsxPath)) {
     return { created: 0, skipped: 0 };
   }
 
   ensureEntriesDir(root);
-  const entries = parseXlsxDiaryRows(xlsxPath);
+
+  if (shouldSkipXlsxImport(root, xlsxPath)) {
+    return { created: 0, skipped: 0 };
+  }
+
+  // 已有日记条目时视为已导入，仅写入标记，避免每次启动解析 Excel
+  if (!fs.existsSync(getXlsxImportMarkerPath(root)) && listEntryFiles(root).length > 0) {
+    writeXlsxImportMarker(root, xlsxPath);
+    return { created: 0, skipped: 0 };
+  }
+
+  const entries = await parseXlsxDiaryRows(xlsxPath);
   const now = new Date().toISOString();
   let created = 0;
   let skipped = 0;
@@ -506,6 +561,7 @@ export function migrateFromXlsxIfNeeded(root: string): { created: number; skippe
     invalidateStatsCache();
   }
 
+  writeXlsxImportMarker(root, xlsxPath);
   return { created, skipped };
 }
 

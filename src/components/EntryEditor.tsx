@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiaryEntry, EditorActions, SavedEntryPayload } from '../lib/types';
+import { AiAssistPanel } from './AiAssistPanel';
 import { FontSettingsTrigger } from './FontSettings';
 import { formatDisplayDate, shiftDate } from '../lib/dateUtils';
 import { countDiaryChars } from '../lib/textUtils';
@@ -51,6 +52,7 @@ export function EntryEditor({
   const [isSynced, setIsSynced] = useState(true);
   const [showSaving, setShowSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef(content);
@@ -266,6 +268,7 @@ export function EntryEditor({
   };
 
   const charCount = useMemo(() => countDiaryChars(content), [content]);
+  const getContentForAi = useCallback(() => contentRef.current, []);
 
   if (initialLoading) {
     return <EditorSkeleton />;
@@ -294,7 +297,9 @@ export function EntryEditor({
     .join(' ');
 
   return (
-    <div className={`editor${focusMode ? ' editor--focus' : ''}`}>
+    <div
+      className={`editor${focusMode ? ' editor--focus' : ''}${aiPanelOpen && !focusMode ? ' editor--with-ai' : ''}`}
+    >
       {focusMode && (
         <div className="focus-chrome titlebar-no-drag">
           <span className="focus-date">{formatDisplayDate(date)}</span>
@@ -345,6 +350,15 @@ export function EntryEditor({
               <FontSettingsTrigger />
               <button
                 type="button"
+                className={`btn-secondary${aiPanelOpen ? ' active' : ''}`}
+                onClick={() => setAiPanelOpen((open) => !open)}
+                title="AI 助手"
+                aria-pressed={aiPanelOpen}
+              >
+                AI
+              </button>
+              <button
+                type="button"
                 className="btn-secondary"
                 onClick={onToggleFocusMode}
                 title="专注模式 (Ctrl+Shift+F · Esc 退出)"
@@ -387,6 +401,14 @@ export function EntryEditor({
           </div>
         </div>
       </div>
+
+      {aiPanelOpen && !focusMode && (
+        <AiAssistPanel
+          date={date}
+          getContent={getContentForAi}
+          onClose={() => setAiPanelOpen(false)}
+        />
+      )}
     </div>
   );
 }

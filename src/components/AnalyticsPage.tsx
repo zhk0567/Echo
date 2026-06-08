@@ -1,11 +1,13 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import type { AnalyticsData } from '../lib/types';
 import { formatCompactDisplayDate, formatDisplayDate, formatShortDisplayDate } from '../lib/dateUtils';
+import { AnalyticsInsight } from './AnalyticsInsight';
 
 interface AnalyticsPageProps {
   refreshKey: number;
   onSelectDate: (date: string) => void;
   onSubtitleChange?: (subtitle: string) => void;
+  onNotify?: (message: string) => void;
 }
 
 function formatChars(chars: number): string {
@@ -32,6 +34,7 @@ export const AnalyticsPage = memo(function AnalyticsPage({
   refreshKey,
   onSelectDate,
   onSubtitleChange,
+  onNotify,
 }: AnalyticsPageProps) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -155,6 +158,8 @@ export const AnalyticsPage = memo(function AnalyticsPage({
           })}
         </div>
       </section>
+
+      <AnalyticsInsight data={data} refreshKey={refreshKey} onNotify={onNotify} />
 
       <section className="analytics-section">
         <h3 className="analytics-section-title">近 12 个月字数</h3>

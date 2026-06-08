@@ -86,3 +86,30 @@ export interface EditorActions {
   isDirty: () => boolean;
   discardPendingChanges: () => void;
 }
+
+export interface AiMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface AiStreamChunkEvent {
+  requestId: string;
+  chunk: string;
+}
+
+export interface AiStreamDoneEvent {
+  requestId: string;
+  aborted?: boolean;
+}
+
+export interface AiStreamErrorEvent {
+  requestId: string;
+  error: string;
+}
+
+export interface OllamaHealth {
+  ok: boolean;
+  hasModel: boolean;
+  models: string[];
+  error?: string;
+}

@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Sidebar, type SidebarHandle } from './components/Sidebar';
 import { EntryEditor } from './components/EntryEditor';
-import { AnalyticsPage } from './components/AnalyticsPage';
 import { SearchBar } from './components/SearchBar';
+
+const AnalyticsPage = lazy(() =>
+  import('./components/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })),
+);
 import { ConfirmDialog } from './components/ConfirmDialog';
 import type { AppView, EditorActions, SavedEntryPayload } from './lib/types';
 import { formatDisplayDate, getRelativeDateLabel, getTodayIso } from './lib/dateUtils';
@@ -238,11 +241,14 @@ export default function App() {
           </div>
           {analyticsEverOpened && (
             <div className={`main-pane${isDiaryView ? ' main-pane--hidden' : ''}`}>
-              <AnalyticsPage
-                refreshKey={analyticsRefreshKey}
-                onSelectDate={requestSelectDate}
-                onSubtitleChange={setAnalyticsSubtitle}
-              />
+              <Suspense fallback={null}>
+                <AnalyticsPage
+                  refreshKey={analyticsRefreshKey}
+                  onSelectDate={requestSelectDate}
+                  onSubtitleChange={setAnalyticsSubtitle}
+                  onNotify={setToast}
+                />
+              </Suspense>
             </div>
           )}
         </div>
