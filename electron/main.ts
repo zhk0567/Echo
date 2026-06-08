@@ -184,17 +184,24 @@ app.whenReady().then(() => {
     const controller = new AbortController();
     streamControllers.set(requestId, controller);
     const sender = event.sender;
+    const timeoutSignal = AbortSignal.timeout(120_000);
+    const signal = AbortSignal.any([controller.signal, timeoutSignal]);
 
     try {
       await chatStream({
         messages,
-        signal: controller.signal,
+        signal,
         onChunk: (chunk) => sender.send('ai:stream-chunk', { requestId, chunk }),
       });
       sender.send('ai:stream-done', { requestId });
     } catch (err) {
       if (controller.signal.aborted) {
         sender.send('ai:stream-done', { requestId, aborted: true });
+      } else if (timeoutSignal.aborted) {
+        sender.send('ai:stream-error', {
+          requestId,
+          error: '请求超时（120 秒），请稍后重试或点击停止',
+        });
       } else {
         const message = err instanceof Error ? err.message : 'AI 请求失败';
         sender.send('ai:stream-error', { requestId, error: message });

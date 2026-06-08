@@ -4,8 +4,8 @@ import {
   ANALYTICS_INSIGHT_USER_PROMPT,
   buildAnalyticsInsightSystemPrompt,
 } from '../lib/aiPrompts';
-
-const DEFAULT_MODEL = 'nemotron-3-super:cloud';
+import { AI_DEFAULT_MODEL } from '../lib/aiConfig';
+import { renderSimpleMarkdown } from '../lib/simpleMarkdown';
 
 interface AnalyticsInsightProps {
   data: AnalyticsData;
@@ -86,7 +86,7 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
       return;
     }
     if (!healthResult.hasModel) {
-      const msg = `请先运行 ollama pull ${DEFAULT_MODEL}`;
+      const msg = `请先运行 ollama pull ${AI_DEFAULT_MODEL}`;
       setError(msg);
       onNotify?.(msg);
       return;
@@ -142,7 +142,7 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
       </div>
 
       <p className="ai-insight-hint">
-        基于统计数据生成写作趋势与习惯分析（模型：{DEFAULT_MODEL}，需已安装并登录 Ollama）
+        基于统计数据生成写作趋势与习惯分析（模型：{AI_DEFAULT_MODEL}，需已安装并登录 Ollama）
       </p>
 
       {error && (
@@ -150,7 +150,7 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
           {error}
           {health && !health.hasModel && (
             <p className="ai-insight-error-cmd">
-              <code>ollama pull {DEFAULT_MODEL}</code>
+              <code>ollama pull {AI_DEFAULT_MODEL}</code>
             </p>
           )}
         </div>
@@ -164,8 +164,10 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
               <div className="ai-insight-skeleton-line" style={{ width: '85%' }} />
               <div className="ai-insight-skeleton-line" style={{ width: '70%' }} />
             </div>
+          ) : streaming ? (
+            <div className="ai-insight-content ai-insight-content--plain">{insight}</div>
           ) : (
-            <div className="ai-insight-content">{insight}</div>
+            <div className="ai-insight-content">{renderSimpleMarkdown(insight)}</div>
           )}
         </div>
       )}

@@ -2229,6 +2229,36 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--border-light);
 }
 
+.ai-health-retry {
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+
+.ai-quick-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.ai-quick-chip {
+  border: 1px solid var(--border-light);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.ai-quick-chip:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .ai-messages {
   flex: 1;
   min-height: 0;
@@ -2398,8 +2428,49 @@ textarea:focus-visible,
   font-size: 0.9rem;
   line-height: 1.65;
   color: var(--text-primary);
-  white-space: pre-wrap;
   font-family: var(--font-content);
+}
+
+.ai-insight-content--plain {
+  white-space: pre-wrap;
+}
+
+.ai-insight-content h2 {
+  margin: 1.25em 0 0.5em;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}
+
+.ai-insight-content h2:first-child {
+  margin-top: 0;
+}
+
+.ai-insight-content h3 {
+  margin: 1em 0 0.4em;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+}
+
+.ai-insight-content p {
+  margin: 0 0 0.75em;
+}
+
+.ai-insight-content ul {
+  margin: 0 0 0.75em;
+  padding-left: 1.25em;
+}
+
+.ai-insight-content li {
+  margin-bottom: 0.35em;
+}
+
+.ai-insight-content strong {
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 @media (max-width: 900px) {

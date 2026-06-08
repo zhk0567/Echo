@@ -1,8 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { AiMessage, OllamaHealth } from '../lib/types';
 import { buildDiaryAssistantSystemPrompt } from '../lib/aiPrompts';
-
-const DEFAULT_MODEL = 'nemotron-3-super:cloud';
+import { AI_DEFAULT_MODEL, AI_QUICK_PROMPTS } from '../lib/aiConfig';
 
 interface AiAssistPanelProps {
   date: string;
@@ -23,20 +22,32 @@ export const AiAssistPanel = memo(function AiAssistPanel({
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
-  useEffect(() => {
-    let cancelled = false;
+  const recheckHealth = useCallback(() => {
     setHealthLoading(true);
+    setError(null);
     window.aiAPI.checkHealth().then((result) => {
-      if (cancelled) return;
       setHealth(result);
       setHealthLoading(false);
     });
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    recheckHealth();
+  }, [recheckHealth]);
+
+  useEffect(() => {
+    if (requestIdRef.current) {
+      void window.aiAPI.abort(requestIdRef.current);
+      requestIdRef.current = null;
+    }
+    setStreaming(false);
+    setMessages([]);
+    setError(null);
+    setInput('');
+  }, [date]);
 
   useEffect(() => {
     const onChunk = ({ requestId, chunk }: { requestId: string; chunk: string }) => {
@@ -100,46 +111,55 @@ export const AiAssistPanel = memo(function AiAssistPanel({
     }
   }, []);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
-    if (!text || streaming || !health?.ok || !health.hasModel) return;
+  const sendMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || streaming || !health?.ok || !health.hasModel) return;
 
-    setError(null);
-    setInput('');
+      setError(null);
+      setInput('');
 
-    const userMessage: AiMessage = { role: 'user', content: text };
-    const assistantPlaceholder: AiMessage = { role: 'assistant', content: '' };
-    setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
+      const userMessage: AiMessage = { role: 'user', content: trimmed };
+      const assistantPlaceholder: AiMessage = { role: 'assistant', content: '' };
+      const history = messagesRef.current;
+      setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
 
-    const requestId = crypto.randomUUID();
-    requestIdRef.current = requestId;
-    setStreaming(true);
+      const requestId = crypto.randomUUID();
+      requestIdRef.current = requestId;
+      setStreaming(true);
 
-    const apiMessages: AiMessage[] = [
-      { role: 'system', content: buildDiaryAssistantSystemPrompt(date, getContent()) },
-      ...messages,
-      userMessage,
-    ];
+      const apiMessages: AiMessage[] = [
+        { role: 'system', content: buildDiaryAssistantSystemPrompt(date, getContent()) },
+        ...history,
+        userMessage,
+      ];
 
-    try {
-      await window.aiAPI.chatStream(requestId, apiMessages);
-    } catch (err) {
-      if (requestIdRef.current === requestId) {
-        requestIdRef.current = null;
-        setStreaming(false);
-        setError(err instanceof Error ? err.message : '发送失败');
+      try {
+        await window.aiAPI.chatStream(requestId, apiMessages);
+      } catch (err) {
+        if (requestIdRef.current === requestId) {
+          requestIdRef.current = null;
+          setStreaming(false);
+          setError(err instanceof Error ? err.message : '发送失败');
+        }
       }
-    }
-  }, [date, getContent, health, input, messages, streaming]);
+    },
+    [date, getContent, health, streaming],
+  );
+
+  const handleSend = useCallback(() => {
+    void sendMessage(input);
+  }, [input, sendMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      void handleSend();
+      handleSend();
     }
   };
 
   const canSend = health?.ok && health.hasModel && !streaming && input.trim().length > 0;
+  const canQuickAsk = health?.ok && health.hasModel && !streaming;
 
   return (
     <aside className="ai-panel" role="dialog" aria-label="AI 助手">
@@ -157,28 +177,49 @@ export const AiAssistPanel = memo(function AiAssistPanel({
           <p>无法连接 Ollama 服务。</p>
           <p>请确认已安装并启动 Ollama（默认端口 11434）。</p>
           {health?.error && <p className="ai-panel-health-detail">{health.error}</p>}
+          <button type="button" className="btn-secondary ai-health-retry" onClick={recheckHealth}>
+            重新检测
+          </button>
         </div>
       ) : !health.hasModel ? (
         <div className="ai-panel-health ai-panel-health--warn">
-          <p>未检测到模型 <code>{DEFAULT_MODEL}</code>。</p>
+          <p>
+            未检测到模型 <code>{AI_DEFAULT_MODEL}</code>。
+          </p>
           <p>
             请先登录 Ollama，并运行：
             <br />
-            <code>ollama pull {DEFAULT_MODEL}</code>
+            <code>ollama pull {AI_DEFAULT_MODEL}</code>
           </p>
           <p className="ai-panel-health-note">
             该模型为 Ollama Cloud 模型，正文将经本机 Ollama 转发至云端推理。
           </p>
+          <button type="button" className="btn-secondary ai-health-retry" onClick={recheckHealth}>
+            重新检测
+          </button>
         </div>
       ) : (
-        <p className="ai-panel-model-hint">
-          模型：{DEFAULT_MODEL}（需已登录 Ollama）
-        </p>
+        <p className="ai-panel-model-hint">模型：{AI_DEFAULT_MODEL}（需已登录 Ollama）</p>
+      )}
+
+      {canQuickAsk && (
+        <div className="ai-quick-prompts">
+          {AI_QUICK_PROMPTS.map((prompt) => (
+            <button
+              key={prompt.label}
+              type="button"
+              className="ai-quick-chip"
+              onClick={() => void sendMessage(prompt.text)}
+            >
+              {prompt.label}
+            </button>
+          ))}
+        </div>
       )}
 
       <div className="ai-messages scrollbar-pill">
         {messages.length === 0 && health?.ok && health.hasModel && (
-          <p className="ai-messages-empty">基于今日日记提问，例如「帮我总结今天写了什么」</p>
+          <p className="ai-messages-empty">基于今日日记提问，或点击上方快捷按钮</p>
         )}
         {messages.map((msg, i) => (
           <div
@@ -199,7 +240,6 @@ export const AiAssistPanel = memo(function AiAssistPanel({
 
       <div className="ai-input-area">
         <textarea
-          ref={inputRef}
           className="ai-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -217,7 +257,7 @@ export const AiAssistPanel = memo(function AiAssistPanel({
             <button
               type="button"
               className="btn-primary ai-btn-send"
-              onClick={() => void handleSend()}
+              onClick={handleSend}
               disabled={!canSend}
             >
               发送
