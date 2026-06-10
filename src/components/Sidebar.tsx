@@ -15,6 +15,7 @@ import {
   getDaysInMonth,
   getFirstWeekday,
   getTodayIso,
+  shiftDate,
 } from '../lib/dateUtils';
 
 export interface SidebarHandle {
@@ -25,10 +26,10 @@ export interface SidebarHandle {
 interface SidebarProps {
   selectedDate: string;
   onSelectDate: (date: string) => void;
-  onNotify?: (message: string) => void;
   inert?: boolean;
   activeView: AppView;
   onOpenAnalytics: () => void;
+  onOpenAi: () => void;
   onOpenDiary: () => void;
 }
 
@@ -84,10 +85,10 @@ export const Sidebar = memo(
     {
       selectedDate,
       onSelectDate,
-      onNotify,
       inert = false,
       activeView,
       onOpenAnalytics,
+      onOpenAi,
       onOpenDiary,
     },
     ref,
@@ -100,6 +101,7 @@ export const Sidebar = memo(
     const [streak, setStreak] = useState(0);
     const [statsLoading, setStatsLoading] = useState(true);
     const fetchRequestId = useRef(0);
+    const hasLoadedOverviewRef = useRef(false);
     const charCountsRef = useRef(charCounts);
     charCountsRef.current = charCounts;
 
@@ -112,12 +114,15 @@ export const Sidebar = memo(
 
     const fetchOverview = useCallback(() => {
       const id = ++fetchRequestId.current;
-      setStatsLoading(true);
+      if (!hasLoadedOverviewRef.current) {
+        setStatsLoading(true);
+      }
       window.diaryAPI.getMonthOverview(year, month).then((overview) => {
         if (id !== fetchRequestId.current) return;
         setCharCounts(overview.charCounts);
         setStats(overview.stats);
         setStreak(overview.streak);
+        hasLoadedOverviewRef.current = true;
         setStatsLoading(false);
       });
     }, [year, month]);
@@ -176,7 +181,12 @@ export const Sidebar = memo(
         });
 
         if (date === today) {
-          window.diaryAPI.getWritingStreak().then(setStreak);
+          if (!had && has) {
+            const yesterdayChars = charCountsRef.current[shiftDate(today, -1)] ?? 0;
+            setStreak((s) => (yesterdayChars > 0 ? s + 1 : 1));
+          } else if (had && !has) {
+            window.diaryAPI.getWritingStreak().then(setStreak);
+          }
         }
       },
       [year, month, today],
@@ -198,27 +208,6 @@ export const Sidebar = memo(
         setMonth((m) => m - 1);
       }
     }, [month]);
-
-    const [exporting, setExporting] = useState(false);
-    const exportingRef = useRef(false);
-
-    const handleExportTxt = useCallback(async () => {
-      if (exportingRef.current) return;
-      exportingRef.current = true;
-      setExporting(true);
-      try {
-        const result = await window.diaryAPI.exportToTxt();
-        if (result.ok) {
-          const name = result.path.split(/[/\\]/).pop() ?? result.path;
-          onNotify?.(`已导出 ${result.count} 篇日记至 ${name}`);
-        } else if (!result.cancelled) {
-          onNotify?.('导出失败，请检查目标路径是否可写');
-        }
-      } finally {
-        exportingRef.current = false;
-        setExporting(false);
-      }
-    }, [onNotify]);
 
     const nextMonth = useCallback(() => {
       if (month === 12) {
@@ -340,20 +329,18 @@ export const Sidebar = memo(
             className={`btn-view${activeView === 'analytics' ? ' active' : ''}`}
             onClick={onOpenAnalytics}
           >
-            数据分析
+            数据
+          </button>
+          <button
+            type="button"
+            className={`btn-view${activeView === 'ai' ? ' active' : ''}`}
+            onClick={onOpenAi}
+          >
+            AI
           </button>
         </div>
 
         <div className="sidebar-footer">
-          <button
-            type="button"
-            className="btn-export-txt"
-            onClick={handleExportTxt}
-            disabled={exporting}
-            title="导出为 日记.txt 格式"
-          >
-            {exporting ? '导出中…' : '导出 TXT'}
-          </button>
           {streak > 0 ? (
             <p className="streak-badge">
               <span className="streak-dot" />

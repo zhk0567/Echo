@@ -7,5 +7,9 @@ release/
 
 # Personal diary data (keep local only)
 entries/
+name-watchlist.json
 日记.txt
 zhita_settings.xlsx
+
+# Build / temp
+_asar_tmp/

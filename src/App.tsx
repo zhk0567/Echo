@@ -6,7 +6,11 @@ import { SearchBar } from './components/SearchBar';
 const AnalyticsPage = lazy(() =>
   import('./components/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })),
 );
+const AiChatPage = lazy(() =>
+  import('./components/AiChatPage').then((m) => ({ default: m.AiChatPage })),
+);
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { ExportTxtButton } from './components/ExportTxtButton';
 import type { AppView, EditorActions, SavedEntryPayload } from './lib/types';
 import { formatDisplayDate, getRelativeDateLabel, getTodayIso } from './lib/dateUtils';
 
@@ -28,6 +32,7 @@ export default function App() {
   const [pendingNav, setPendingNav] = useState<PendingNav>(null);
   const [searchHighlight, setSearchHighlight] = useState<string | null>(null);
   const [analyticsEverOpened, setAnalyticsEverOpened] = useState(false);
+  const [aiEverOpened, setAiEverOpened] = useState(false);
   const editorRef = useRef<EditorActions | null>(null);
   const sidebarRef = useRef<SidebarHandle>(null);
   const selectedDateRef = useRef(selectedDate);
@@ -58,6 +63,7 @@ export default function App() {
   }, [focusMode]);
 
   const scheduleAnalyticsRefresh = useCallback(() => {
+    if (viewRef.current !== 'analytics') return;
     if (analyticsRefreshTimerRef.current) {
       clearTimeout(analyticsRefreshTimerRef.current);
     }
@@ -83,16 +89,31 @@ export default function App() {
     [scheduleAnalyticsRefresh],
   );
 
-  const navigateTo = useCallback((date: string, searchQuery?: string) => {
+  const openDiaryAtDate = useCallback((date: string, searchQuery?: string) => {
     setView('diary');
     setSelectedDate(date);
     if (searchQuery) setSearchHighlight(searchQuery);
   }, []);
 
+  const handleSearchName = useCallback(
+    async (name: string) => {
+      const results = await window.diaryAPI.searchEntries(name);
+      if (results.length > 0) {
+        openDiaryAtDate(results[0].date, name);
+        return;
+      }
+      setToast(`日记中未找到「${name}」`);
+    },
+    [openDiaryAtDate],
+  );
+
   const completePendingNav = useCallback(
     (nav: NonNullable<PendingNav>) => {
       if (nav.type === 'date') {
-        navigateTo(nav.date, nav.searchQuery);
+        setSelectedDate(nav.date);
+        if (nav.searchQuery) {
+          openDiaryAtDate(nav.date, nav.searchQuery);
+        }
         return;
       }
       if (nav.type === 'quit') {
@@ -104,7 +125,7 @@ export default function App() {
         setFocusMode(false);
       }
     },
-    [navigateTo],
+    [openDiaryAtDate],
   );
 
   const onDirtyChange = useCallback((dirty: boolean) => {
@@ -122,17 +143,24 @@ export default function App() {
 
   const requestSelectDate = useCallback(
     (date: string, searchQuery?: string) => {
-      if (
-        date === selectedDateRef.current &&
-        viewRef.current === 'diary' &&
-        !searchQuery
-      ) {
+      if (searchQuery) {
+        if (promptIfDirty({ type: 'date', date, searchQuery })) return;
+        openDiaryAtDate(date, searchQuery);
         return;
       }
-      if (promptIfDirty({ type: 'date', date, searchQuery })) return;
-      navigateTo(date, searchQuery);
+      if (date === selectedDateRef.current) return;
+      if (viewRef.current === 'diary' && promptIfDirty({ type: 'date', date })) return;
+      setSelectedDate(date);
     },
-    [navigateTo, promptIfDirty],
+    [openDiaryAtDate, promptIfDirty],
+  );
+
+  const requestOpenDiary = useCallback(
+    (date: string) => {
+      if (promptIfDirty({ type: 'date', date })) return;
+      openDiaryAtDate(date);
+    },
+    [openDiaryAtDate, promptIfDirty],
   );
 
   const requestView = useCallback(
@@ -177,9 +205,12 @@ export default function App() {
   }, []);
 
   const isDiaryView = view === 'diary';
+  const isAnalyticsView = view === 'analytics';
+  const isAiView = view === 'ai';
 
   useEffect(() => {
     if (view === 'analytics') setAnalyticsEverOpened(true);
+    if (view === 'ai') setAiEverOpened(true);
   }, [view]);
 
   useEffect(() => {
@@ -199,10 +230,10 @@ export default function App() {
         ref={sidebarRef}
         selectedDate={selectedDate}
         onSelectDate={requestSelectDate}
-        onNotify={setToast}
         inert={focusMode}
         activeView={view}
         onOpenAnalytics={() => requestView('analytics')}
+        onOpenAi={() => requestView('ai')}
         onOpenDiary={() => requestView('diary')}
       />
       <main className="main">
@@ -213,15 +244,25 @@ export default function App() {
                 {formatDisplayDate(selectedDate)}
                 <span>{getRelativeDateLabel(selectedDate)}</span>
               </>
-            ) : (
+            ) : isAnalyticsView ? (
               <>
                 数据分析
                 <span>{analyticsSubtitle}</span>
               </>
+            ) : (
+              <>
+                AI 助手
+                <span>{formatDisplayDate(selectedDate)} 的对话</span>
+              </>
             )}
           </div>
-          <div className="main-header-search titlebar-no-drag">
-            {isDiaryView && <SearchBar onSelectDate={requestSelectDate} />}
+          <div className="main-header-actions titlebar-no-drag">
+            {isDiaryView && (
+              <div className="main-header-search">
+                <SearchBar onSelectDate={requestSelectDate} />
+              </div>
+            )}
+            <ExportTxtButton onNotify={setToast} />
           </div>
         </header>
         <div className="main-body">
@@ -240,12 +281,25 @@ export default function App() {
             />
           </div>
           {analyticsEverOpened && (
-            <div className={`main-pane${isDiaryView ? ' main-pane--hidden' : ''}`}>
+            <div className={`main-pane${isAnalyticsView ? '' : ' main-pane--hidden'}`}>
               <Suspense fallback={null}>
                 <AnalyticsPage
                   refreshKey={analyticsRefreshKey}
-                  onSelectDate={requestSelectDate}
+                  onSelectDate={requestOpenDiary}
+                  onSearchName={handleSearchName}
                   onSubtitleChange={setAnalyticsSubtitle}
+                  onNotify={setToast}
+                />
+              </Suspense>
+            </div>
+          )}
+          {aiEverOpened && (
+            <div className={`main-pane${isAiView ? '' : ' main-pane--hidden'}`}>
+              <Suspense fallback={null}>
+                <AiChatPage
+                  active={isAiView}
+                  date={selectedDate}
+                  onSelectDate={requestOpenDiary}
                   onNotify={setToast}
                 />
               </Suspense>

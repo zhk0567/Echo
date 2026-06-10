@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { detectPersonNames } from './nameDetection';
 
 type XlsxModule = typeof import('xlsx');
 
@@ -68,6 +69,18 @@ export interface AnalyticsHeatmapCell {
   level: 0 | 1 | 2 | 3;
 }
 
+export interface NameStatPoint {
+  name: string;
+  totalCount: number;
+  entryDays: number;
+  lastDate: string | null;
+}
+
+export interface NameStatsData {
+  watchlist: string[];
+  stats: NameStatPoint[];
+}
+
 export interface AnalyticsData {
   summary: AnalyticsSummary;
   monthlyTrend: AnalyticsMonthPoint[];
@@ -76,6 +89,7 @@ export interface AnalyticsData {
   topEntries: AnalyticsEntryRank[];
   bottomEntries: AnalyticsEntryRank[];
   heatmap: AnalyticsHeatmapCell[];
+  nameStats: NameStatsData;
 }
 
 const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -93,6 +107,7 @@ interface StatsCache {
   totalChars: number;
   datesWithContent: Set<string>;
   charByDate: Map<string, number>;
+  entryFileCount: number;
 }
 
 const CHAR_INDEX_VERSION = 1;
@@ -108,6 +123,15 @@ interface CharIndexFile {
 let statsCache: StatsCache | null = null;
 let analyticsCache: { root: string; data: AnalyticsData } | null = null;
 let contentIndex: { root: string; byDate: Map<string, string> } | null = null;
+const createdAtCache = new Map<string, string>();
+let charIndexPersistTimer: ReturnType<typeof setTimeout> | null = null;
+const CHAR_INDEX_PERSIST_MS = 2500;
+const NAME_WATCHLIST_FILENAME = 'name-watchlist.json';
+const MAX_NAME_LENGTH = 8;
+
+interface NameWatchlistFile {
+  names: string[];
+}
 
 function invalidateStatsCache(): void {
   statsCache = null;
@@ -115,7 +139,7 @@ function invalidateStatsCache(): void {
   contentIndex = null;
 }
 
-function invalidateAnalyticsCache(): void {
+export function invalidateAnalyticsCache(): void {
   analyticsCache = null;
 }
 
@@ -140,11 +164,15 @@ function loadCharIndex(root: string): CharIndexFile | null {
   }
 }
 
-function saveCharIndex(root: string, charByDate: Map<string, number>): void {
+function saveCharIndex(
+  root: string,
+  charByDate: Map<string, number>,
+  entryFileCount: number,
+): void {
   ensureEntriesDir(root);
   const record: CharIndexFile = {
     version: CHAR_INDEX_VERSION,
-    entryFileCount: listEntryFiles(root).length,
+    entryFileCount,
     charByDate: Object.fromEntries(charByDate),
   };
   fs.writeFileSync(getCharIndexPath(root), JSON.stringify(record), 'utf-8');
@@ -158,7 +186,8 @@ function rebuildCharIndex(root: string): Map<string, number> {
     const chars = countChars(entry.content);
     if (chars > 0) charByDate.set(entry.date, chars);
   }
-  saveCharIndex(root, charByDate);
+  const entryFileCount = listEntryFiles(root).length;
+  saveCharIndex(root, charByDate, entryFileCount);
   return charByDate;
 }
 
@@ -166,13 +195,18 @@ function isCharIndexStale(root: string, index: CharIndexFile): boolean {
   return listEntryFiles(root).length !== index.entryFileCount;
 }
 
-function buildStatsCacheFromCharMap(root: string, charByDate: Map<string, number>): StatsCache {
+function buildStatsCacheFromCharMap(
+  root: string,
+  charByDate: Map<string, number>,
+  entryFileCount: number,
+): StatsCache {
   const cache: StatsCache = {
     root,
     totalEntries: 0,
     totalChars: 0,
     datesWithContent: new Set(),
     charByDate,
+    entryFileCount,
   };
 
   for (const [date, chars] of charByDate) {
@@ -189,22 +223,43 @@ function ensureStatsCache(root: string): StatsCache {
   if (statsCache?.root === root) return statsCache;
 
   const loaded = loadCharIndex(root);
-  const charMap =
-    loaded && !isCharIndexStale(root, loaded)
-      ? new Map(Object.entries(loaded.charByDate))
-      : rebuildCharIndex(root);
+  let charMap: Map<string, number>;
+  let entryFileCount: number;
 
-  statsCache = buildStatsCacheFromCharMap(root, charMap);
+  if (loaded && !isCharIndexStale(root, loaded)) {
+    charMap = new Map(Object.entries(loaded.charByDate));
+    entryFileCount = loaded.entryFileCount;
+  } else {
+    charMap = rebuildCharIndex(root);
+    entryFileCount = listEntryFiles(root).length;
+  }
+
+  statsCache = buildStatsCacheFromCharMap(root, charMap, entryFileCount);
   return statsCache;
 }
 
 export function warmupDiaryStore(root: string): void {
   ensureStatsCache(root);
+  setImmediate(() => {
+    try {
+      ensureContentIndex(root);
+    } catch {
+      // ignore — best effort background warmup
+    }
+  });
 }
 
 function persistCharIndexFromCache(root: string): void {
   if (!statsCache || statsCache.root !== root) return;
-  saveCharIndex(root, statsCache.charByDate);
+  saveCharIndex(root, statsCache.charByDate, statsCache.entryFileCount);
+}
+
+function schedulePersistCharIndex(root: string): void {
+  if (charIndexPersistTimer) clearTimeout(charIndexPersistTimer);
+  charIndexPersistTimer = setTimeout(() => {
+    charIndexPersistTimer = null;
+    persistCharIndexFromCache(root);
+  }, CHAR_INDEX_PERSIST_MS);
 }
 
 function updateStatsCache(root: string, date: string, content: string): void {
@@ -226,7 +281,7 @@ function updateStatsCache(root: string, date: string, content: string): void {
     cache.charByDate.set(date, chars);
   }
 
-  persistCharIndexFromCache(root);
+  schedulePersistCharIndex(root);
   invalidateAnalyticsCache();
   updateContentIndexEntry(root, date, content);
 }
@@ -587,6 +642,7 @@ export function getEntry(root: string, date: string): DiaryEntry | null {
   if (!fs.existsSync(filePath)) return null;
   const entry = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as DiaryEntry;
   entry.content = normalizeNewlines(entry.content);
+  createdAtCache.set(entry.date, entry.createdAt);
   return entry;
 }
 
@@ -594,9 +650,10 @@ export function saveEntry(root: string, date: string, content: string): DiaryEnt
   ensureEntriesDir(root);
   const filePath = getEntryPath(root, date);
   const now = new Date().toISOString();
-  let createdAt = `${date}T00:00:00.000Z`;
+  const fileExisted = fs.existsSync(filePath);
+  let createdAt = createdAtCache.get(date) ?? `${date}T00:00:00.000Z`;
 
-  if (fs.existsSync(filePath)) {
+  if (fileExisted && !createdAtCache.has(date)) {
     try {
       const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as DiaryEntry;
       createdAt = raw.createdAt;
@@ -614,6 +671,13 @@ export function saveEntry(root: string, date: string, content: string): DiaryEnt
   };
 
   fs.writeFileSync(filePath, JSON.stringify(record), 'utf-8');
+  createdAtCache.set(date, createdAt);
+
+  if (!fileExisted) {
+    const cache = ensureStatsCache(root);
+    cache.entryFileCount++;
+  }
+
   updateStatsCache(root, date, normalized);
   return record;
 }
@@ -622,6 +686,9 @@ export function deleteEntry(root: string, date: string): boolean {
   const filePath = getEntryPath(root, date);
   if (!fs.existsSync(filePath)) return false;
   fs.unlinkSync(filePath);
+  createdAtCache.delete(date);
+  const cache = ensureStatsCache(root);
+  cache.entryFileCount = Math.max(0, cache.entryFileCount - 1);
   updateStatsCache(root, date, '');
   return true;
 }
@@ -704,6 +771,94 @@ function shiftMonth(year: number, month: number, delta: number): { year: number;
   return { year: d.getFullYear(), month: d.getMonth() + 1 };
 }
 
+function getNameWatchlistPath(root: string): string {
+  return path.join(root, NAME_WATCHLIST_FILENAME);
+}
+
+function normalizeWatchlist(names: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name || name.length > MAX_NAME_LENGTH) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    result.push(name);
+  }
+  return result;
+}
+
+export function getNameWatchlist(root: string): string[] {
+  const filePath = getNameWatchlistPath(root);
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as NameWatchlistFile;
+    return normalizeWatchlist(raw.names ?? []);
+  } catch {
+    return [];
+  }
+}
+
+export function saveNameWatchlist(root: string, names: string[]): string[] {
+  const normalized = normalizeWatchlist(names);
+  fs.writeFileSync(
+    getNameWatchlistPath(root),
+    JSON.stringify({ names: normalized }, null, 2),
+    'utf-8',
+  );
+  invalidateAnalyticsCache();
+  return normalized;
+}
+
+/** 扫描日记正文自动检测人名，合并进关注列表（保留已有项） */
+export function autoDetectNames(root: string): { names: string[]; added: string[] } {
+  const byDate = ensureContentIndex(root);
+  const detected = detectPersonNames(byDate);
+  const existing = getNameWatchlist(root);
+  const existingSet = new Set(existing);
+  const added = detected.filter((n) => !existingSet.has(n));
+  const merged = normalizeWatchlist([...existing, ...detected]);
+  const names = merged.length === existing.length ? existing : saveNameWatchlist(root, merged);
+  return { names, added };
+}
+
+function countSubstringOccurrences(text: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let pos = 0;
+  while ((pos = text.indexOf(needle, pos)) !== -1) {
+    count++;
+    pos += needle.length;
+  }
+  return count;
+}
+
+function buildNameStats(root: string): NameStatsData {
+  const watchlist = getNameWatchlist(root);
+  const byDate = ensureContentIndex(root);
+  const stats: NameStatPoint[] = [];
+
+  for (const name of watchlist) {
+    let totalCount = 0;
+    let entryDays = 0;
+    let lastDate: string | null = null;
+
+    for (const [date, content] of byDate) {
+      const n = countSubstringOccurrences(content, name);
+      if (n > 0) {
+        totalCount += n;
+        entryDays++;
+        if (!lastDate || date > lastDate) lastDate = date;
+      }
+    }
+
+    stats.push({ name, totalCount, entryDays, lastDate });
+  }
+
+  stats.sort((a, b) => b.totalCount - a.totalCount);
+  return { watchlist, stats };
+}
+
 function buildAnalytics(root: string): AnalyticsData {
   const cache = ensureStatsCache(root);
   const entries = [...cache.charByDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
@@ -784,6 +939,7 @@ function buildAnalytics(root: string): AnalyticsData {
     topEntries,
     bottomEntries,
     heatmap,
+    nameStats: buildNameStats(root),
   };
 }
 

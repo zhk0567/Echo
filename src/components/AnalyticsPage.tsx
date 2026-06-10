@@ -2,10 +2,12 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import type { AnalyticsData } from '../lib/types';
 import { formatCompactDisplayDate, formatDisplayDate, formatShortDisplayDate } from '../lib/dateUtils';
 import { AnalyticsInsight } from './AnalyticsInsight';
+import { NameStatsSection } from './NameStatsSection';
 
 interface AnalyticsPageProps {
   refreshKey: number;
   onSelectDate: (date: string) => void;
+  onSearchName: (name: string) => void;
   onSubtitleChange?: (subtitle: string) => void;
   onNotify?: (message: string) => void;
 }
@@ -33,11 +35,13 @@ function AnalyticsSkeleton() {
 export const AnalyticsPage = memo(function AnalyticsPage({
   refreshKey,
   onSelectDate,
+  onSearchName,
   onSubtitleChange,
   onNotify,
 }: AnalyticsPageProps) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [nameStatsRefresh, setNameStatsRefresh] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +54,7 @@ export const AnalyticsPage = memo(function AnalyticsPage({
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, nameStatsRefresh]);
 
   useEffect(() => {
     if (!onSubtitleChange) return;
@@ -103,6 +107,12 @@ export const AnalyticsPage = memo(function AnalyticsPage({
     return (
       <div className="analytics-page">
         <p className="analytics-empty">还没有可分析的数据，先写几篇日记吧</p>
+        <NameStatsSection
+          nameStats={data.nameStats}
+          hasEntries={false}
+          onWatchlistChange={() => setNameStatsRefresh((k) => k + 1)}
+          onSearchName={onSearchName}
+        />
       </div>
     );
   }
@@ -110,7 +120,7 @@ export const AnalyticsPage = memo(function AnalyticsPage({
   const { summary } = data;
 
   return (
-    <div className="analytics-page scrollbar-pill">
+    <div className="analytics-page">
       <section className="analytics-section">
         <h3 className="analytics-section-title">总览</h3>
         <div className="analytics-summary-grid">
@@ -159,6 +169,13 @@ export const AnalyticsPage = memo(function AnalyticsPage({
         </div>
       </section>
 
+      <NameStatsSection
+        nameStats={data.nameStats}
+        hasEntries={true}
+        onWatchlistChange={() => setNameStatsRefresh((k) => k + 1)}
+        onSearchName={onSearchName}
+      />
+
       <AnalyticsInsight data={data} refreshKey={refreshKey} onNotify={onNotify} />
 
       <section className="analytics-section">
@@ -184,8 +201,9 @@ export const AnalyticsPage = memo(function AnalyticsPage({
         </div>
       </section>
 
-      <section className="analytics-section analytics-section--half">
-        <h3 className="analytics-section-title">按星期分布</h3>
+      <div className="analytics-section--half">
+        <section className="analytics-section">
+          <h3 className="analytics-section-title">按星期分布</h3>
         <div className="analytics-bar-chart analytics-bar-chart--horizontal">
           {data.weekdayDistribution.map((point, i) => (
             <div
@@ -207,10 +225,10 @@ export const AnalyticsPage = memo(function AnalyticsPage({
             </div>
           ))}
         </div>
-      </section>
+        </section>
 
-      <section className="analytics-section analytics-section--half">
-        <h3 className="analytics-section-title">按年份对比</h3>
+        <section className="analytics-section">
+          <h3 className="analytics-section-title">按年份对比</h3>
         <div className="analytics-bar-chart analytics-bar-chart--horizontal">
           {data.yearlyStats.map((point, i) => (
             <div
@@ -232,7 +250,8 @@ export const AnalyticsPage = memo(function AnalyticsPage({
             </div>
           ))}
         </div>
-      </section>
+        </section>
+      </div>
 
       <section className="analytics-section analytics-section--rank">
         <div className="analytics-rank-col">

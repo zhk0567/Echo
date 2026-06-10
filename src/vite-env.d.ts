@@ -65,6 +65,18 @@ interface AnalyticsHeatmapCell {
   level: 0 | 1 | 2 | 3;
 }
 
+interface NameStatPoint {
+  name: string;
+  totalCount: number;
+  entryDays: number;
+  lastDate: string | null;
+}
+
+interface NameStatsData {
+  watchlist: string[];
+  stats: NameStatPoint[];
+}
+
 interface AnalyticsData {
   summary: AnalyticsSummary;
   monthlyTrend: AnalyticsMonthPoint[];
@@ -73,6 +85,7 @@ interface AnalyticsData {
   topEntries: AnalyticsEntryRank[];
   bottomEntries: AnalyticsEntryRank[];
   heatmap: AnalyticsHeatmapCell[];
+  nameStats: NameStatsData;
 }
 
 interface DiaryAPI {
@@ -86,6 +99,9 @@ interface DiaryAPI {
   getMonthCharCounts: (year: number, month: number) => Promise<Record<string, number>>;
   getMonthOverview: (year: number, month: number) => Promise<MonthOverview>;
   getAnalytics: () => Promise<AnalyticsData>;
+  getNameWatchlist: () => Promise<string[]>;
+  saveNameWatchlist: (names: string[]) => Promise<string[]>;
+  autoDetectNames: () => Promise<{ names: string[]; added: string[] }>;
   confirmAppClose: () => Promise<void>;
   onCloseRequested: (callback: () => void) => () => void;
   exportToTxt: () => Promise<

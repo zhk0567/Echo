@@ -152,10 +152,12 @@ export const SearchBar = memo(function SearchBar({ onSelectDate }: SearchBarProp
         <SearchIcon />
         <input
           ref={inputRef}
-          type="search"
+          type="text"
+          role="searchbox"
           className="search-input"
           placeholder="搜索日记... (Ctrl+K)"
           aria-label="搜索日记"
+          autoComplete="off"
           value={query}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}

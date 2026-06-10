@@ -20,6 +20,7 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
 }: AnalyticsInsightProps) {
   const [insight, setInsight] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [insightComplete, setInsightComplete] = useState(false);
   const [health, setHealth] = useState<OllamaHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef<string | null>(null);
@@ -28,6 +29,7 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
 
   useEffect(() => {
     setInsight('');
+    setInsightComplete(false);
     setError(null);
   }, [refreshKey]);
 
@@ -41,12 +43,14 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
       if (requestId !== requestIdRef.current) return;
       requestIdRef.current = null;
       setStreaming(false);
+      setInsightComplete(true);
     };
 
     const onStreamError = ({ requestId, error: err }: { requestId: string; error: string }) => {
       if (requestId !== requestIdRef.current) return;
       requestIdRef.current = null;
       setStreaming(false);
+      setInsightComplete(false);
       setError(err);
       onNotify?.(`AI 洞察生成失败：${err}`);
     };
@@ -75,6 +79,7 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
 
     setError(null);
     setInsight('');
+    setInsightComplete(false);
 
     const healthResult = await window.aiAPI.checkHealth();
     setHealth(healthResult);
@@ -107,6 +112,7 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
       if (requestIdRef.current === requestId) {
         requestIdRef.current = null;
         setStreaming(false);
+        setInsightComplete(false);
         const msg = err instanceof Error ? err.message : '生成失败';
         setError(msg);
         onNotify?.(msg);
@@ -164,10 +170,10 @@ export const AnalyticsInsight = memo(function AnalyticsInsight({
               <div className="ai-insight-skeleton-line" style={{ width: '85%' }} />
               <div className="ai-insight-skeleton-line" style={{ width: '70%' }} />
             </div>
-          ) : streaming ? (
-            <div className="ai-insight-content ai-insight-content--plain">{insight}</div>
-          ) : (
+          ) : insightComplete ? (
             <div className="ai-insight-content">{renderSimpleMarkdown(insight)}</div>
+          ) : (
+            <div className="ai-insight-content ai-insight-content--plain">{insight}</div>
           )}
         </div>
       )}

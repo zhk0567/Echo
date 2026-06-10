@@ -63,6 +63,18 @@ export interface AnalyticsHeatmapCell {
   level: 0 | 1 | 2 | 3;
 }
 
+export interface NameStatPoint {
+  name: string;
+  totalCount: number;
+  entryDays: number;
+  lastDate: string | null;
+}
+
+export interface NameStatsData {
+  watchlist: string[];
+  stats: NameStatPoint[];
+}
+
 export interface AnalyticsData {
   summary: AnalyticsSummary;
   monthlyTrend: AnalyticsMonthPoint[];
@@ -71,9 +83,10 @@ export interface AnalyticsData {
   topEntries: AnalyticsEntryRank[];
   bottomEntries: AnalyticsEntryRank[];
   heatmap: AnalyticsHeatmapCell[];
+  nameStats: NameStatsData;
 }
 
-export type AppView = 'diary' | 'analytics';
+export type AppView = 'diary' | 'analytics' | 'ai';
 
 export interface SavedEntryPayload {
   date: string;

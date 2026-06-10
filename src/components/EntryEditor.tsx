@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { DiaryEntry, EditorActions, SavedEntryPayload } from '../lib/types';
-import { AiAssistPanel } from './AiAssistPanel';
 import { FontSettingsTrigger } from './FontSettings';
 import { formatDisplayDate, shiftDate } from '../lib/dateUtils';
 import { countDiaryChars } from '../lib/textUtils';
@@ -19,7 +18,7 @@ interface EntryEditorProps {
   editorRef: React.MutableRefObject<EditorActions | null>;
 }
 
-const AUTO_SAVE_MS = 600;
+const AUTO_SAVE_MS = 1500;
 
 function EditorSkeleton() {
   return (
@@ -34,7 +33,7 @@ function EditorSkeleton() {
   );
 }
 
-export function EntryEditor({
+export const EntryEditor = memo(function EntryEditor({
   date,
   focusMode,
   onToggleFocusMode,
@@ -49,10 +48,11 @@ export function EntryEditor({
   const [content, setContent] = useState('');
   const [initialLoading, setInitialLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
-  const [isSynced, setIsSynced] = useState(true);
   const [showSaving, setShowSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [saveAcknowledged, setSaveAcknowledged] = useState(false);
+  const [displayCharCount, setDisplayCharCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef(content);
@@ -102,8 +102,9 @@ export function EntryEditor({
       try {
         await window.diaryAPI.saveEntry(dateRef.current, text);
         savedContentRef.current = text;
-        setIsSynced(true);
         onSaved({ date: dateRef.current, charCount: countDiaryChars(text) });
+        setHasUnsavedChanges(false);
+        setSaveAcknowledged(true);
         onDirtyChange(false);
         return true;
       } catch {
@@ -139,7 +140,9 @@ export function EntryEditor({
       const text = entry?.content ?? '';
       setContent(text);
       savedContentRef.current = text;
-      setIsSynced(true);
+      setDisplayCharCount(countDiaryChars(text));
+      setHasUnsavedChanges(false);
+      setSaveAcknowledged(text.length > 0);
       clearSavingDelay();
       setShowSaving(false);
       onDirtyChange(false);
@@ -195,7 +198,6 @@ export function EntryEditor({
     }
     setContent(savedContentRef.current);
     setError(null);
-    setIsSynced(true);
     onDirtyChange(false);
   }, [onDirtyChange]);
 
@@ -223,12 +225,19 @@ export function EntryEditor({
   const scheduleSave = useCallback(
     (text: string) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      setIsSynced(false);
+      setHasUnsavedChanges(true);
       onDirtyChange(true);
       debounceRef.current = setTimeout(() => saveRef.current(text), AUTO_SAVE_MS);
     },
     [onDirtyChange],
   );
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setDisplayCharCount(countDiaryChars(content));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [content]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -267,9 +276,6 @@ export function EntryEditor({
     scheduleSave(value);
   };
 
-  const charCount = useMemo(() => countDiaryChars(content), [content]);
-  const getContentForAi = useCallback(() => contentRef.current, []);
-
   if (initialLoading) {
     return <EditorSkeleton />;
   }
@@ -281,7 +287,9 @@ export function EntryEditor({
       <span className="save-dot" />
       保存中
     </span>
-  ) : isSynced ? (
+  ) : hasUnsavedChanges ? (
+    <span className="save-badge pending" aria-live="polite">待保存</span>
+  ) : saveAcknowledged ? (
     <span className="save-badge saved" aria-live="off">
       <span className="save-check">✓</span>
       已保存
@@ -297,14 +305,12 @@ export function EntryEditor({
     .join(' ');
 
   return (
-    <div
-      className={`editor${focusMode ? ' editor--focus' : ''}${aiPanelOpen && !focusMode ? ' editor--with-ai' : ''}`}
-    >
+    <div className={`editor${focusMode ? ' editor--focus' : ''}`}>
       {focusMode && (
         <div className="focus-chrome titlebar-no-drag">
           <span className="focus-date">{formatDisplayDate(date)}</span>
           <div className="focus-meta">
-            <span className="editor-stats">{charCount} 字</span>
+            <span className="editor-stats">{displayCharCount} 字</span>
             {saveStatus}
           </div>
           <button
@@ -343,20 +349,11 @@ export function EntryEditor({
               </button>
             </div>
             <div className="editor-meta">
-              <span className="editor-stats">{charCount} 字</span>
+              <span className="editor-stats">{displayCharCount} 字</span>
               {saveStatus}
             </div>
             <div className="editor-actions">
               <FontSettingsTrigger />
-              <button
-                type="button"
-                className={`btn-secondary${aiPanelOpen ? ' active' : ''}`}
-                onClick={() => setAiPanelOpen((open) => !open)}
-                title="AI 助手"
-                aria-pressed={aiPanelOpen}
-              >
-                AI
-              </button>
               <button
                 type="button"
                 className="btn-secondary"
@@ -401,14 +398,6 @@ export function EntryEditor({
           </div>
         </div>
       </div>
-
-      {aiPanelOpen && !focusMode && (
-        <AiAssistPanel
-          date={date}
-          getContent={getContentForAi}
-          onClose={() => setAiPanelOpen(false)}
-        />
-      )}
     </div>
   );
-}
+});

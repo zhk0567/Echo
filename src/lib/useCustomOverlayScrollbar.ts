@@ -193,10 +193,12 @@ export function useCustomOverlayScrollbar(
       window.removeEventListener('mouseup', onWindowMouseUp);
       ro?.disconnect();
     };
-  }, [enabled, scrollRef, gutterRef, syncLayout, show, scheduleHide, clearTimers, syncKey]);
+  }, [enabled, scrollRef, gutterRef, syncLayout, show, scheduleHide, clearTimers]);
 
   useEffect(() => {
-    if (enabled) syncLayout();
+    if (!enabled) return;
+    const frame = requestAnimationFrame(() => syncLayout());
+    return () => cancelAnimationFrame(frame);
   }, [syncKey, enabled, syncLayout]);
 
   const onThumbMouseDown = useCallback(

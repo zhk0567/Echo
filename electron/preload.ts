@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('diaryAPI', {
   getMonthOverview: (year: number, month: number) =>
     ipcRenderer.invoke('diary:getMonthOverview', year, month),
   getAnalytics: () => ipcRenderer.invoke('diary:getAnalytics'),
+  getNameWatchlist: () => ipcRenderer.invoke('diary:getNameWatchlist'),
+  saveNameWatchlist: (names: string[]) => ipcRenderer.invoke('diary:saveNameWatchlist', names),
+  autoDetectNames: () => ipcRenderer.invoke('diary:autoDetectNames'),
   confirmAppClose: () => ipcRenderer.invoke('diary:confirmClose'),
   exportToTxt: () => ipcRenderer.invoke('diary:exportToTxt'),
   onCloseRequested: (callback: () => void) => {

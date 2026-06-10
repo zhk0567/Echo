@@ -1,5 +1,7 @@
 export const DEFAULT_MODEL = 'nemotron-3-super:cloud';
 export const DEFAULT_BASE_URL = 'http://127.0.0.1:11434';
+/** Nemotron 等推理模型默认会先流式输出 thinking，日记助手关闭以加快首字响应 */
+export const DEFAULT_THINK = false;
 
 export interface AiMessage {
   role: 'system' | 'user' | 'assistant';
@@ -47,15 +49,23 @@ export async function chatStream(options: {
   messages: AiMessage[];
   model?: string;
   baseUrl?: string;
+  think?: boolean;
   signal?: AbortSignal;
   onChunk: (text: string) => void;
 }): Promise<void> {
-  const { messages, model = DEFAULT_MODEL, baseUrl = DEFAULT_BASE_URL, signal, onChunk } = options;
+  const {
+    messages,
+    model = DEFAULT_MODEL,
+    baseUrl = DEFAULT_BASE_URL,
+    think = DEFAULT_THINK,
+    signal,
+    onChunk,
+  } = options;
 
   const res = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, stream: true }),
+    body: JSON.stringify({ model, messages, stream: true, think }),
     signal,
   });
 
@@ -84,8 +94,10 @@ export async function chatStream(options: {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
-        const json = JSON.parse(trimmed) as { message?: { content?: string } };
-        const chunk = json.message?.content;
+        const json = JSON.parse(trimmed) as {
+          message?: { content?: string; thinking?: string };
+        };
+        const chunk = json.message?.content || json.message?.thinking;
         if (chunk) onChunk(chunk);
       } catch {
         // ignore malformed stream lines

@@ -8,9 +8,12 @@ import {
   getMonthCharCounts,
   getAnalytics,
   getMonthOverview,
+  autoDetectNames,
+  getNameWatchlist,
   getStats,
   getWritingStreak,
   listDates,
+  saveNameWatchlist,
   migrateFromTxtIfNeeded,
   migrateFromXlsxIfNeeded,
   saveEntry,
@@ -18,6 +21,7 @@ import {
   warmupDiaryStore,
 } from './diaryStore';
 import { chatStream, checkOllamaHealth, type AiMessage } from './ollamaService';
+import { enforceSingleInstance } from './singleInstance';
 
 let mainWindow: BrowserWindow | null = null;
 const streamControllers = new Map<string, AbortController>();
@@ -92,7 +96,7 @@ function createWindow() {
     titleBarStyle: 'hidden',
     titleBarOverlay: {
       color: '#faf6ee',
-      symbolColor: '#1f1a16',
+      symbolColor: '#4a433c',
       height: 36,
     },
     webPreferences: {
@@ -108,9 +112,26 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
+  let windowShown = false;
+  const showMainWindow = () => {
+    if (windowShown || !mainWindow) return;
+    windowShown = true;
+    mainWindow.show();
     scheduleStartupTasks(appRoot);
+  };
+
+  const showFallbackTimer = setTimeout(() => {
+    console.warn('[Echo] ready-to-show timeout — showing window as fallback');
+    showMainWindow();
+  }, 8000);
+
+  mainWindow.once('ready-to-show', () => {
+    clearTimeout(showFallbackTimer);
+    showMainWindow();
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[Echo] did-fail-load', errorCode, errorDescription, validatedURL);
   });
 
   mainWindow.on('close', (e) => {
@@ -129,7 +150,9 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+if (!enforceSingleInstance(() => mainWindow)) {
+  // Another instance holds the lock; this process is exiting.
+} else app.whenReady().then(() => {
   appRoot = getAppRoot();
   setImmediate(() => warmupDiaryStore(appRoot));
 
@@ -171,6 +194,18 @@ app.whenReady().then(() => {
 
   ipcMain.handle('diary:getAnalytics', () => {
     return getAnalytics(appRoot);
+  });
+
+  ipcMain.handle('diary:getNameWatchlist', () => {
+    return getNameWatchlist(appRoot);
+  });
+
+  ipcMain.handle('diary:saveNameWatchlist', (_event, names: string[]) => {
+    return saveNameWatchlist(appRoot, names);
+  });
+
+  ipcMain.handle('diary:autoDetectNames', () => {
+    return autoDetectNames(appRoot);
   });
 
   ipcMain.handle('diary:confirmClose', () => {
