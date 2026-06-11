@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('diaryAPI', {
 
 contextBridge.exposeInMainWorld('aiAPI', {
   checkHealth: () => ipcRenderer.invoke('ai:checkHealth'),
+  warmup: () => ipcRenderer.invoke('ai:warmup'),
   chatStream: (requestId: string, messages: AiMessage[]) =>
     ipcRenderer.invoke('ai:chatStream', requestId, messages),
   abort: (requestId: string) => ipcRenderer.invoke('ai:abort', requestId),
@@ -65,6 +66,8 @@ interface AiStreamChunkEvent {
 interface AiStreamDoneEvent {
   requestId: string;
   aborted?: boolean;
+  partial?: boolean;
+  timeoutKind?: 'idle' | 'max';
 }
 
 interface AiStreamErrorEvent {

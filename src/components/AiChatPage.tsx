@@ -1,11 +1,16 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { AiMessage, OllamaHealth } from '../lib/types';
 import { buildDiaryAssistantSystemPrompt } from '../lib/aiPrompts';
-import { AI_DEFAULT_MODEL, AI_QUICK_PROMPTS } from '../lib/aiConfig';
+import {
+  AI_DEFAULT_MODEL,
+  AI_MAX_HISTORY_MESSAGES,
+  AI_QUICK_PROMPTS,
+} from '../lib/aiConfig';
 import { clearAiChat, loadAiChat, saveAiChat } from '../lib/aiChatStore';
 import { formatDisplayDate } from '../lib/dateUtils';
 import { renderSimpleMarkdown } from '../lib/simpleMarkdown';
 import { countDiaryChars } from '../lib/textUtils';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface AiChatPageProps {
   active: boolean;
@@ -28,13 +33,18 @@ export const AiChatPage = memo(function AiChatPage({
   const [error, setError] = useState<string | null>(null);
   const [diaryContent, setDiaryContent] = useState('');
   const [diaryLoading, setDiaryLoading] = useState(true);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const requestIdRef = useRef<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
   const messagesRef = useRef(messages);
   const diaryContentRef = useRef(diaryContent);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onNotifyRef = useRef(onNotify);
+  const warmupScheduledRef = useRef(false);
   messagesRef.current = messages;
   diaryContentRef.current = diaryContent;
+  onNotifyRef.current = onNotify;
 
   const recheckHealth = useCallback(() => {
     setHealthLoading(true);
@@ -48,6 +58,15 @@ export const AiChatPage = memo(function AiChatPage({
   useEffect(() => {
     recheckHealth();
   }, [recheckHealth]);
+
+  useEffect(() => {
+    if (!active || !health?.ok || !health.hasModel || warmupScheduledRef.current) return;
+    warmupScheduledRef.current = true;
+    const timer = setTimeout(() => {
+      void window.aiAPI.warmup();
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [active, health?.ok, health?.hasModel]);
 
   useEffect(() => {
     if (!active) return;
@@ -101,10 +120,26 @@ export const AiChatPage = memo(function AiChatPage({
       });
     };
 
-    const onDone = ({ requestId }: { requestId: string }) => {
+    const onDone = ({
+      requestId,
+      partial,
+      timeoutKind,
+    }: {
+      requestId: string;
+      partial?: boolean;
+      timeoutKind?: 'idle' | 'max';
+    }) => {
       if (requestId !== requestIdRef.current) return;
       requestIdRef.current = null;
       setStreaming(false);
+      if (partial) {
+        setError(null);
+        onNotifyRef.current?.(
+          timeoutKind === 'max'
+            ? '生成时间较长，以上内容可能不完整，可重新提问'
+            : '连接一度无新内容，已保留已生成部分，可重新提问',
+        );
+      }
     };
 
     const onStreamError = ({ requestId, error: err }: { requestId: string; error: string }) => {
@@ -125,9 +160,29 @@ export const AiChatPage = memo(function AiChatPage({
     };
   }, []);
 
+  const scrollRafRef = useRef<number | null>(null);
+
+  const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceFromBottom <= 72;
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: streaming ? 'auto' : 'smooth' });
-  }, [messages, streaming]);
+    if (!stickToBottomRef.current) return;
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      scrollMessagesToBottom(streaming ? 'auto' : 'smooth');
+    });
+  }, [messages, streaming, scrollMessagesToBottom]);
 
   useEffect(() => {
     return () => {
@@ -150,10 +205,13 @@ export const AiChatPage = memo(function AiChatPage({
 
       setError(null);
       setInput('');
+      stickToBottomRef.current = true;
 
       const userMessage: AiMessage = { role: 'user', content: trimmed };
       const assistantPlaceholder: AiMessage = { role: 'assistant', content: '' };
-      const history = messagesRef.current;
+      const history = messagesRef.current
+        .filter((m) => m.content.trim())
+        .slice(-AI_MAX_HISTORY_MESSAGES);
       setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
 
       const requestId = crypto.randomUUID();
@@ -163,7 +221,11 @@ export const AiChatPage = memo(function AiChatPage({
       const apiMessages: AiMessage[] = [
         {
           role: 'system',
-          content: buildDiaryAssistantSystemPrompt(date, diaryContentRef.current),
+          content: buildDiaryAssistantSystemPrompt(
+            date,
+            diaryContentRef.current,
+            history.length === 0 ? 'full' : 'compact',
+          ),
         },
         ...history,
         userMessage,
@@ -189,12 +251,16 @@ export const AiChatPage = memo(function AiChatPage({
   const handleClearChat = useCallback(() => {
     if (streaming) return;
     if (messages.length === 0) return;
-    if (!window.confirm(`确定清空 ${formatDisplayDate(date)} 的对话记录吗？`)) return;
+    setClearDialogOpen(true);
+  }, [messages.length, streaming]);
+
+  const handleConfirmClearChat = useCallback(() => {
     clearAiChat(date);
     setMessages([]);
     setError(null);
+    setClearDialogOpen(false);
     onNotify?.('已清空该日对话');
-  }, [date, messages.length, onNotify, streaming]);
+  }, [date, onNotify]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -203,8 +269,9 @@ export const AiChatPage = memo(function AiChatPage({
     }
   };
 
-  const canSend = health?.ok && health.hasModel && !streaming && input.trim().length > 0;
-  const canQuickAsk = health?.ok && health.hasModel && !streaming;
+  const canSend =
+    health?.ok && health.hasModel && !streaming && !diaryLoading && input.trim().length > 0;
+  const canQuickAsk = health?.ok && health.hasModel && !streaming && !diaryLoading;
   const charCount = countDiaryChars(diaryContent);
   const hasDiary = charCount > 0;
 
@@ -278,7 +345,11 @@ export const AiChatPage = memo(function AiChatPage({
           </div>
         )}
 
-        <div className="ai-chat-messages scrollbar-pill">
+        <div
+          ref={messagesContainerRef}
+          className="ai-chat-messages scrollbar-pill"
+          onScroll={handleMessagesScroll}
+        >
           {messages.length === 0 && health?.ok && health.hasModel && (
             <div className="ai-chat-empty">
               <p className="ai-chat-empty-title">开始与 AI 对话</p>
@@ -309,7 +380,6 @@ export const AiChatPage = memo(function AiChatPage({
               </div>
             );
           })}
-          <div ref={messagesEndRef} />
         </div>
 
         {error && (
@@ -348,6 +418,17 @@ export const AiChatPage = memo(function AiChatPage({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={clearDialogOpen}
+        title="清空对话"
+        message={`确定清空 ${formatDisplayDate(date)} 的对话记录吗？此操作无法撤销。`}
+        confirmLabel="清空"
+        cancelLabel="取消"
+        confirmVariant="danger"
+        onConfirm={handleConfirmClearChat}
+        onCancel={() => setClearDialogOpen(false)}
+      />
     </div>
   );
 });

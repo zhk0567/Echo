@@ -1,26 +1,29 @@
 import type { AnalyticsData } from './types';
 import { formatCompactDisplayDate } from './dateUtils';
-
-const MAX_DIARY_CONTEXT_CHARS = 8000;
+import { AI_MAX_DIARY_CONTEXT_CHARS } from './aiConfig';
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n\n…（正文已截断，仅发送前 ${max} 字）`;
 }
 
-export function buildDiaryAssistantSystemPrompt(date: string, content: string): string {
+export function buildDiaryAssistantSystemPrompt(
+  date: string,
+  content: string,
+  mode: 'full' | 'compact' = 'full',
+): string {
+  if (mode === 'compact') {
+    return `你是 Echo 日记助手。继续关于 ${date} 日记的对话。用简体中文自然回答；不编造；语气温暖克制；篇幅按需展开，把话说完整。`;
+  }
+
   const trimmed = content.trim();
-  const body = trimmed ? truncate(trimmed, MAX_DIARY_CONTEXT_CHARS) : '（今日尚无正文）';
+  const body = trimmed
+    ? truncate(trimmed, AI_MAX_DIARY_CONTEXT_CHARS)
+    : '（今日尚无正文）';
 
-  return `你是 Echo 日记应用中的私人写作助手。用户正在查看 ${date} 的日记。
+  return `你是 Echo 日记助手。用户正在看 ${date} 的日记。用简体中文、自然分段回答；基于日记事实，不编造；语气温暖克制；篇幅按需展开，不必刻意缩短；除非明确要求不要代写正文。
 
-规则：
-- 使用简体中文回答
-- 基于下方日记内容作答，不要编造未出现的事实
-- 尊重隐私，语气温暖、克制
-- 可帮用户总结、反思、拓展思路，但不要替用户写日记正文除非明确要求
-
-【${date} 日记正文】
+【日记】
 ${body}`;
 }
 
@@ -67,4 +70,4 @@ export function buildAnalyticsInsightSystemPrompt(data: AnalyticsData): string {
 }
 
 export const ANALYTICS_INSIGHT_USER_PROMPT =
-  '请根据上述统计数据，生成一份简洁、有温度的写作洞察报告。';
+  '请根据上述统计数据，生成一份有温度的写作洞察报告。';

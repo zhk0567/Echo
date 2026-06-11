@@ -20,11 +20,25 @@ import {
   searchEntries,
   warmupDiaryStore,
 } from './diaryStore';
-import { chatStream, checkOllamaHealth, type AiMessage } from './ollamaService';
+import {
+  ChatStreamTimeoutError,
+  CHAT_STREAM_IPC_BATCH_MS,
+  chatStream,
+  checkOllamaHealth,
+  isModelRunning,
+  warmupModel,
+  type AiMessage,
+} from './ollamaService';
+import {
+  getDefaultExportPath,
+  migrateExportSettingsFromAppRoot,
+  rememberExportPath,
+} from './exportSettings';
 import { enforceSingleInstance } from './singleInstance';
 
 let mainWindow: BrowserWindow | null = null;
 const streamControllers = new Map<string, AbortController>();
+let warmupAbortController: AbortController | null = null;
 let allowClose = false;
 let appRoot = '';
 
@@ -154,6 +168,7 @@ if (!enforceSingleInstance(() => mainWindow)) {
   // Another instance holds the lock; this process is exiting.
 } else app.whenReady().then(() => {
   appRoot = getAppRoot();
+  migrateExportSettingsFromAppRoot(appRoot);
   setImmediate(() => warmupDiaryStore(appRoot));
 
   ipcMain.handle('diary:listDates', (_event, year?: number, month?: number) => {
@@ -215,33 +230,85 @@ if (!enforceSingleInstance(() => mainWindow)) {
 
   ipcMain.handle('ai:checkHealth', () => checkOllamaHealth());
 
+  ipcMain.handle('ai:warmup', async () => {
+    if (await isModelRunning()) return;
+    if (warmupAbortController) warmupAbortController.abort();
+    warmupAbortController = new AbortController();
+    const signal = warmupAbortController.signal;
+    try {
+      await warmupModel(undefined, undefined, signal);
+    } finally {
+      if (warmupAbortController?.signal === signal) warmupAbortController = null;
+    }
+  });
+
   ipcMain.handle('ai:chatStream', async (event, requestId: string, messages: AiMessage[]) => {
+    if (warmupAbortController) {
+      warmupAbortController.abort();
+      warmupAbortController = null;
+    }
+
     const controller = new AbortController();
     streamControllers.set(requestId, controller);
     const sender = event.sender;
-    const timeoutSignal = AbortSignal.timeout(120_000);
-    const signal = AbortSignal.any([controller.signal, timeoutSignal]);
+    let receivedChunk = false;
+    let pendingChunk = '';
+    let batchTimer: ReturnType<typeof setTimeout> | null = null;
+    let flushedToUi = false;
+
+    const flushChunks = () => {
+      batchTimer = null;
+      if (!pendingChunk) return;
+      sender.send('ai:stream-chunk', { requestId, chunk: pendingChunk });
+      pendingChunk = '';
+      flushedToUi = true;
+    };
+
+    const scheduleFlush = () => {
+      if (!flushedToUi) {
+        flushChunks();
+        return;
+      }
+      if (!batchTimer) {
+        batchTimer = setTimeout(flushChunks, CHAT_STREAM_IPC_BATCH_MS);
+      }
+    };
 
     try {
       await chatStream({
         messages,
-        signal,
-        onChunk: (chunk) => sender.send('ai:stream-chunk', { requestId, chunk }),
+        signal: controller.signal,
+        onChunk: (chunk) => {
+          receivedChunk = true;
+          pendingChunk += chunk;
+          scheduleFlush();
+        },
       });
       sender.send('ai:stream-done', { requestId });
     } catch (err) {
       if (controller.signal.aborted) {
         sender.send('ai:stream-done', { requestId, aborted: true });
-      } else if (timeoutSignal.aborted) {
-        sender.send('ai:stream-error', {
-          requestId,
-          error: '请求超时（120 秒），请稍后重试或点击停止',
-        });
+      } else if (err instanceof ChatStreamTimeoutError) {
+        if (receivedChunk) {
+          sender.send('ai:stream-done', {
+            requestId,
+            partial: true,
+            timeoutKind: err.kind,
+          });
+        } else {
+          const error =
+            err.kind === 'idle'
+              ? '长时间无响应（120 秒），请检查 Ollama 或稍后重试'
+              : '生成时间过长，请缩短日记上下文或稍后重试';
+          sender.send('ai:stream-error', { requestId, error });
+        }
       } else {
         const message = err instanceof Error ? err.message : 'AI 请求失败';
         sender.send('ai:stream-error', { requestId, error: message });
       }
     } finally {
+      if (batchTimer) clearTimeout(batchTimer);
+      flushChunks();
       streamControllers.delete(requestId);
     }
   });
@@ -255,7 +322,7 @@ if (!enforceSingleInstance(() => mainWindow)) {
     const win = mainWindow ?? BrowserWindow.getFocusedWindow();
     const { canceled, filePath } = await dialog.showSaveDialog(win ?? undefined, {
       title: '导出日记',
-      defaultPath: path.join(appRoot, '日记.txt'),
+      defaultPath: getDefaultExportPath(),
       filters: [{ name: '文本文件', extensions: ['txt'] }],
     });
     if (canceled || !filePath) {
@@ -263,6 +330,7 @@ if (!enforceSingleInstance(() => mainWindow)) {
     }
     try {
       const { count } = exportDiaryToTxt(appRoot, filePath);
+      rememberExportPath(filePath);
       return { ok: true as const, path: filePath, count };
     } catch {
       return { ok: false as const, cancelled: false };

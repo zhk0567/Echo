@@ -4,23 +4,49 @@ function normalizeText(text: string): string {
   return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 }
 
+/** 修补模型常输出的不完整 Markdown（如未闭合的 **） */
+function repairInlineMarkdown(text: string): string {
+  const trimmed = text.trim();
+  if (
+    trimmed.startsWith('**') &&
+    trimmed.length > 2 &&
+    trimmed.indexOf('**', 2) === -1
+  ) {
+    return `${trimmed}**`;
+  }
+  return text;
+}
+
 function parseInline(text: string, lineKey: number): ReactNode[] {
+  const repaired = repairInlineMarkdown(text);
   const parts: ReactNode[] = [];
-  const regex = /\*\*(.+?)\*\*/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
+  let remaining = repaired;
   let partIndex = 0;
 
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
+  while (remaining.length > 0) {
+    const boldStart = remaining.indexOf('**');
+    if (boldStart === -1) {
+      parts.push(remaining);
+      break;
     }
-    parts.push(<strong key={`${lineKey}-b-${partIndex++}`}>{match[1]}</strong>);
-    lastIndex = regex.lastIndex;
-  }
 
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
+    if (boldStart > 0) {
+      parts.push(remaining.slice(0, boldStart));
+      remaining = remaining.slice(boldStart);
+      continue;
+    }
+
+    const closeIndex = remaining.indexOf('**', 2);
+    if (closeIndex === -1) {
+      parts.push(<strong key={`${lineKey}-b-${partIndex++}`}>{remaining.slice(2)}</strong>);
+      break;
+    }
+
+    const inner = remaining.slice(2, closeIndex);
+    if (inner) {
+      parts.push(<strong key={`${lineKey}-b-${partIndex++}`}>{inner}</strong>);
+    }
+    remaining = remaining.slice(closeIndex + 2);
   }
 
   return parts.length > 0 ? parts : [text];
@@ -28,7 +54,7 @@ function parseInline(text: string, lineKey: number): ReactNode[] {
 
 const HEADING_RE = /^(#{1,3})\s*(.+)$/;
 const BOLD_LINE_RE = /^\*\*(.+)\*\*$/;
-const UL_RE = /^[-*•]\s+(.+)$/;
+const UL_RE = /^(?:[-*]|•)\s+(.+)$/;
 const OL_RE = /^\d+[.)]\s+(.+)$/;
 
 const SECTION_HEADINGS = [
@@ -128,7 +154,7 @@ export function renderSimpleMarkdown(text: string): ReactNode {
   flushLists();
 
   if (nodes.length === 0 && text.trim()) {
-    return <p>{text.trim()}</p>;
+    return <p>{parseInline(text.trim(), 0)}</p>;
   }
 
   return <Fragment>{nodes}</Fragment>;

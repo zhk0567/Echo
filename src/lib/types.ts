@@ -113,6 +113,8 @@ export interface AiStreamChunkEvent {
 export interface AiStreamDoneEvent {
   requestId: string;
   aborted?: boolean;
+  partial?: boolean;
+  timeoutKind?: 'idle' | 'max';
 }
 
 export interface AiStreamErrorEvent {

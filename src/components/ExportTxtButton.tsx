@@ -15,8 +15,7 @@ export const ExportTxtButton = memo(function ExportTxtButton({ onNotify }: Expor
     try {
       const result = await window.diaryAPI.exportToTxt();
       if (result.ok) {
-        const name = result.path.split(/[/\\]/).pop() ?? result.path;
-        onNotify?.(`已导出 ${result.count} 篇日记至 ${name}`);
+        onNotify?.(`已导出 ${result.count} 篇日记至 ${result.path}`);
       } else if (!result.cancelled) {
         onNotify?.('导出失败，请检查目标路径是否可写');
       }

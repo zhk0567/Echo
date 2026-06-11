@@ -94,38 +94,19 @@ $portableExe = Get-ChildItem "release" -Filter "Echo-Diary-*-portable.exe" -Erro
 $releaseTarget = if (Test-Path $unpackedExe) { $unpackedExe } elseif ($portableExe) { $portableExe.FullName } else { $null }
 $needsBuild = -not $releaseTarget -or (Test-ReleaseOutdated $releaseTarget)
 
-if ($needsBuild -and $env:ECHO_START_VISIBLE -ne '1') {
-    $env:ECHO_START_VISIBLE = '1'
-    Start-Process powershell.exe -ArgumentList @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath
-    ) -WindowStyle Normal
-    exit 0
+if ($needsBuild) {
+    Build-Release
 }
 
 if (Test-Path $unpackedExe) {
-    if (Test-ReleaseOutdated $unpackedExe) {
-        Build-Release
-    }
     Write-Host "Launching Echo Diary..." -ForegroundColor Green
     Start-Process -FilePath $unpackedExe -WorkingDirectory $PSScriptRoot
-} elseif ($portableExe) {
-    if (Test-ReleaseOutdated $portableExe.FullName) {
-        Build-Release
-        $portableExe = Get-ChildItem "release" -Filter "Echo-Diary-*-portable.exe" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-    }
+} elseif ($portableExe = Get-ChildItem "release" -Filter "Echo-Diary-*-portable.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1) {
     Write-Host "Launching: $($portableExe.Name)" -ForegroundColor Green
     Start-Process -FilePath $portableExe.FullName -WorkingDirectory $PSScriptRoot
 } else {
-    Write-Host "未找到打包版本，正在构建..." -ForegroundColor Yellow
-    Build-Release
-    if (Test-Path $unpackedExe) {
-        Start-Process -FilePath $unpackedExe -WorkingDirectory $PSScriptRoot
-    } elseif ($portableExe = Get-ChildItem "release" -Filter "Echo-Diary-*-portable.exe" -ErrorAction SilentlyContinue | Select-Object -First 1) {
-        Start-Process -FilePath $portableExe.FullName -WorkingDirectory $PSScriptRoot
-    } else {
-        Write-Host "Starting dev mode..." -ForegroundColor Green
-        npm run dev
-    }
+    Write-Host "Starting dev mode (run from terminal for logs)..." -ForegroundColor Green
+    npm run dev
 }

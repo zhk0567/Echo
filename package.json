@@ -1,7 +1,7 @@
 {
   "name": "echo-diary",
   "version": "1.0.0",
-  "description": "Echo 日记桌面应用",
+  "description": "Echo Diary desktop app",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -25,7 +25,13 @@
         "portable",
         "dir"
       ],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "versionInfo": {
+        "CompanyName": "Echo",
+        "FileDescription": "Echo Diary",
+        "ProductName": "Echo Diary",
+        "LegalCopyright": "Copyright Echo"
+      }
     },
     "portable": {
       "artifactName": "Echo-Diary-${version}-portable.exe"

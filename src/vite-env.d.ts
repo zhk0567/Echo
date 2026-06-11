@@ -123,6 +123,8 @@ interface AiStreamChunkEvent {
 interface AiStreamDoneEvent {
   requestId: string;
   aborted?: boolean;
+  partial?: boolean;
+  timeoutKind?: 'idle' | 'max';
 }
 
 interface AiStreamErrorEvent {
@@ -139,6 +141,7 @@ interface OllamaHealth {
 
 interface AiAPI {
   checkHealth: () => Promise<OllamaHealth>;
+  warmup: () => Promise<void>;
   chatStream: (requestId: string, messages: AiMessage[]) => Promise<void>;
   abort: (requestId: string) => Promise<void>;
   onStreamChunk: (callback: (payload: AiStreamChunkEvent) => void) => () => void;
