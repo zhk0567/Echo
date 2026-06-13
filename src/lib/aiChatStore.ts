@@ -1,58 +1,38 @@
 import type { AiMessage } from './types';
 
-const STORAGE_KEY = 'echo-ai-chats';
+const LEGACY_STORAGE_KEY = 'echo-ai-chats';
 
-interface StoredChat {
-  messages: AiMessage[];
-  updatedAt: string;
-}
+type LegacyChatStore = Record<string, { messages?: AiMessage[] }>;
 
-type ChatStore = Record<string, StoredChat>;
+let migrationDone = false;
 
-function readStore(): ChatStore {
+/** 将旧版 localStorage 对话迁移到主进程文件（仅执行一次） */
+export async function migrateLegacyAiChatsIfNeeded(): Promise<void> {
+  if (migrationDone) return;
+  migrationDone = true;
+
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as ChatStore;
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return;
+    const legacy = JSON.parse(raw) as LegacyChatStore;
+    const count = await window.aiAPI.migrateLegacyChats(legacy);
+    if (count > 0) {
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    }
   } catch {
-    return {};
+    // ignore
   }
 }
 
-function writeStore(store: ChatStore): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+export async function loadAiChat(date: string): Promise<AiMessage[]> {
+  await migrateLegacyAiChatsIfNeeded();
+  return window.aiAPI.loadChat(date);
 }
 
-function sanitizeMessages(messages: AiMessage[]): AiMessage[] {
-  return messages.filter(
-    (m) =>
-      (m.role === 'user' && m.content.trim()) ||
-      (m.role === 'assistant' && m.content.trim()),
-  );
+export async function saveAiChat(date: string, messages: AiMessage[]): Promise<void> {
+  await window.aiAPI.saveChat(date, messages);
 }
 
-export function loadAiChat(date: string): AiMessage[] {
-  const store = readStore();
-  return store[date]?.messages ?? [];
-}
-
-export function saveAiChat(date: string, messages: AiMessage[]): void {
-  const sanitized = sanitizeMessages(messages);
-  const store = readStore();
-  if (sanitized.length === 0) {
-    delete store[date];
-  } else {
-    store[date] = {
-      messages: sanitized,
-      updatedAt: new Date().toISOString(),
-    };
-  }
-  writeStore(store);
-}
-
-export function clearAiChat(date: string): void {
-  const store = readStore();
-  delete store[date];
-  writeStore(store);
+export async function clearAiChat(date: string): Promise<void> {
+  await window.aiAPI.clearChat(date);
 }

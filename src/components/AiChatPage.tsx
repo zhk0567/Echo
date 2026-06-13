@@ -37,14 +37,22 @@ export const AiChatPage = memo(function AiChatPage({
   const requestIdRef = useRef<string | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const dateRef = useRef(date);
   const messagesRef = useRef(messages);
   const diaryContentRef = useRef(diaryContent);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onNotifyRef = useRef(onNotify);
   const warmupScheduledRef = useRef(false);
+  dateRef.current = date;
   messagesRef.current = messages;
   diaryContentRef.current = diaryContent;
   onNotifyRef.current = onNotify;
+
+  const flushSave = useCallback((targetDate?: string, msgs?: AiMessage[]) => {
+    const d = targetDate ?? dateRef.current;
+    const m = msgs ?? messagesRef.current;
+    void saveAiChat(d, m);
+  }, []);
 
   const recheckHealth = useCallback(() => {
     setHealthLoading(true);
@@ -83,6 +91,8 @@ export const AiChatPage = memo(function AiChatPage({
   }, [date, active]);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (requestIdRef.current) {
       void window.aiAPI.abort(requestIdRef.current);
       requestIdRef.current = null;
@@ -90,23 +100,46 @@ export const AiChatPage = memo(function AiChatPage({
     setStreaming(false);
     setError(null);
     setInput('');
-    setMessages(loadAiChat(date));
+
+    void loadAiChat(date).then((loaded) => {
+      if (!cancelled) setMessages(loaded);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [date]);
 
   useEffect(() => {
-    if (!active || streaming) return;
+    return () => {
+      flushSave(date);
+    };
+  }, [date, flushSave]);
+
+  useEffect(() => {
+    if (!active) {
+      flushSave();
+      return;
+    }
+    if (streaming) return;
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
-      saveAiChat(date, messages);
+      flushSave();
       persistTimerRef.current = null;
-    }, 500);
+    }, 400);
     return () => {
       if (persistTimerRef.current) {
         clearTimeout(persistTimerRef.current);
         persistTimerRef.current = null;
       }
     };
-  }, [active, date, messages, streaming]);
+  }, [active, date, messages, streaming, flushSave]);
+
+  useEffect(() => {
+    return () => {
+      flushSave();
+    };
+  }, [flushSave]);
 
   useEffect(() => {
     const onChunk = ({ requestId, chunk }: { requestId: string; chunk: string }) => {
@@ -255,7 +288,7 @@ export const AiChatPage = memo(function AiChatPage({
   }, [messages.length, streaming]);
 
   const handleConfirmClearChat = useCallback(() => {
-    clearAiChat(date);
+    void clearAiChat(date);
     setMessages([]);
     setError(null);
     setClearDialogOpen(false);
@@ -327,7 +360,9 @@ export const AiChatPage = memo(function AiChatPage({
             </button>
           </div>
         ) : (
-          <p className="ai-chat-model-hint">模型：{AI_DEFAULT_MODEL}</p>
+          <p className="ai-chat-model-hint">
+            模型：{AI_DEFAULT_MODEL} · 对话按日期保存，切换左侧日历可查看该日记录
+          </p>
         )}
 
         {canQuickAsk && (

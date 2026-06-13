@@ -10,22 +10,17 @@ $unpackedExe = Join-Path $projectRoot "release\win-unpacked\Echo Diary.exe"
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.WorkingDirectory = $projectRoot
-# ASCII only — Chinese in .lnk Comments breaks tooltip encoding on some Windows locales
 $shortcut.Description = "Echo Diary - personal journal"
 
-if (Test-Path $unpackedExe) {
-    $shortcut.TargetPath = $unpackedExe
-    $shortcut.IconLocation = "$unpackedExe,0"
-    Write-Host "Shortcut targets packaged app (no console)." -ForegroundColor Green
-} elseif (Test-Path $launcherVbs) {
+# Always use VBS launcher so source updates trigger rebuild before opening exe
+if (Test-Path $launcherVbs) {
     $shortcut.TargetPath = $launcherVbs
-    $iconExe = $unpackedExe
-    if (Test-Path $iconExe) {
-        $shortcut.IconLocation = "$iconExe,0"
+    if (Test-Path $unpackedExe) {
+        $shortcut.IconLocation = "$unpackedExe,0"
     }
-    Write-Host "Shortcut targets silent VBS launcher." -ForegroundColor Green
+    Write-Host "Shortcut targets launcher (auto-rebuild when code changes)." -ForegroundColor Green
 } else {
-    Write-Error "No launcher found. Run npm run build first, or ensure Echo-Diary.vbs exists."
+    Write-Error "Echo-Diary.vbs not found in project root."
 }
 
 $shortcut.Save()

@@ -6,8 +6,8 @@ export const AI_MAX_DIARY_CONTEXT_CHARS = 3500;
 /** 多轮对话时仅保留最近 N 条消息（user+assistant 各算一条） */
 export const AI_MAX_HISTORY_MESSAGES = 6;
 
-/** 生成 token 上限；-1 表示不限制长度（Ollama 约定） */
-export const AI_NUM_PREDICT = -1;
+/** 生成 token 上限；云端模型要求为正数，8192 足够长回复 */
+export const AI_NUM_PREDICT = 8192;
 
 /** 上下文窗口；与日记截断配合，略大于正文+对话即可 */
 export const AI_NUM_CTX = 6144;

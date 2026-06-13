@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('diaryAPI', {
 });
 
 contextBridge.exposeInMainWorld('aiAPI', {
+  loadChat: (date: string) => ipcRenderer.invoke('ai:loadChat', date),
+  saveChat: (date: string, messages: AiMessage[]) =>
+    ipcRenderer.invoke('ai:saveChat', date, messages),
+  clearChat: (date: string) => ipcRenderer.invoke('ai:clearChat', date),
+  migrateLegacyChats: (legacy: Record<string, { messages?: AiMessage[] }>) =>
+    ipcRenderer.invoke('ai:migrateLegacyChats', legacy),
   checkHealth: () => ipcRenderer.invoke('ai:checkHealth'),
   warmup: () => ipcRenderer.invoke('ai:warmup'),
   chatStream: (requestId: string, messages: AiMessage[]) =>

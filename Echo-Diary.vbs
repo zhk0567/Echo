@@ -1,10 +1,17 @@
-' Silent launcher — start packaged GUI exe directly (no PowerShell console)
+' Silent launcher — rebuild when source changed, then start packaged GUI exe
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 root = fso.GetParentFolderName(WScript.ScriptFullName)
 sh.CurrentDirectory = root
 
 unpackedExe = root & "\release\win-unpacked\Echo Diary.exe"
+ensureScript = root & "\scripts\ensure-release.ps1"
+
+If fso.FileExists(ensureScript) Then
+  sh.Environment("Process")("ECHO_APP_ROOT") = root
+  sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & ensureScript & """", 0, True
+End If
+
 If fso.FileExists(unpackedExe) Then
   sh.Run Chr(34) & unpackedExe & Chr(34), 1, False
   WScript.Quit
@@ -28,6 +35,5 @@ If fso.FolderExists(releaseDir) Then
   End If
 End If
 
-' First-time setup / no release yet: hidden wrapper (window style 0)
 sh.Environment("Process")("ECHO_APP_ROOT") = root
 sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & root & "\start.ps1""", 0, False

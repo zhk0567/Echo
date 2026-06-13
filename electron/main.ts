@@ -30,6 +30,12 @@ import {
   type AiMessage,
 } from './ollamaService';
 import {
+  clearAiChat,
+  loadAiChat,
+  migrateAiChatsFromLegacy,
+  saveAiChat,
+} from './aiChatStore';
+import {
   getDefaultExportPath,
   migrateExportSettingsFromAppRoot,
   rememberExportPath,
@@ -227,6 +233,22 @@ if (!enforceSingleInstance(() => mainWindow)) {
     allowClose = true;
     mainWindow?.close();
   });
+
+  ipcMain.handle('ai:loadChat', (_event, date: string) => loadAiChat(date));
+
+  ipcMain.handle('ai:saveChat', (_event, date: string, messages: AiMessage[]) => {
+    saveAiChat(date, messages);
+  });
+
+  ipcMain.handle('ai:clearChat', (_event, date: string) => {
+    clearAiChat(date);
+  });
+
+  ipcMain.handle(
+    'ai:migrateLegacyChats',
+    (_event, legacy: Record<string, { messages?: AiMessage[] }>) =>
+      migrateAiChatsFromLegacy(legacy),
+  );
 
   ipcMain.handle('ai:checkHealth', () => checkOllamaHealth());
 

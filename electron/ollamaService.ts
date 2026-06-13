@@ -9,7 +9,7 @@ export const CHAT_STREAM_MAX_DURATION_MS = 600_000;
 export const CHAT_STREAM_IPC_BATCH_MS = 45;
 
 const DEFAULT_CHAT_OPTIONS = {
-  num_predict: -1,
+  num_predict: 8192,
   num_ctx: 6144,
   temperature: 0.65,
   top_p: 0.9,

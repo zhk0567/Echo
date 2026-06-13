@@ -140,6 +140,12 @@ interface OllamaHealth {
 }
 
 interface AiAPI {
+  loadChat: (date: string) => Promise<AiMessage[]>;
+  saveChat: (date: string, messages: AiMessage[]) => Promise<void>;
+  clearChat: (date: string) => Promise<void>;
+  migrateLegacyChats: (
+    legacy: Record<string, { messages?: AiMessage[] }>,
+  ) => Promise<number>;
   checkHealth: () => Promise<OllamaHealth>;
   warmup: () => Promise<void>;
   chatStream: (requestId: string, messages: AiMessage[]) => Promise<void>;

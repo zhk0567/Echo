@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && electron-builder",
+    "build:dir": "vite build && electron-builder --dir",
     "migrate": "node scripts/migrate-from-txt.mjs",
     "import:xlsx": "node scripts/import-from-xlsx.mjs",
     "preview": "vite preview"
@@ -25,13 +26,7 @@
         "portable",
         "dir"
       ],
-      "signAndEditExecutable": false,
-      "versionInfo": {
-        "CompanyName": "Echo",
-        "FileDescription": "Echo Diary",
-        "ProductName": "Echo Diary",
-        "LegalCopyright": "Copyright Echo"
-      }
+      "signAndEditExecutable": false
     },
     "portable": {
       "artifactName": "Echo-Diary-${version}-portable.exe"
